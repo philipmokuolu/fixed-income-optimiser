@@ -1,0 +1,6 @@
+{
+  "name": "Fixed Income Portfolio Optimiser (4)",
+  "description": "Includes the ability to drag and drop files into the web app and a password to protect the app",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
