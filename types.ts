@@ -31,7 +31,7 @@ export interface BenchmarkHolding {
 }
 
 // Represents the master data for a bond, excluding position-specific details.
-export type BondStaticData = Omit<Bond, 'isin' | 'notional' | 'marketValue' | 'portfolioWeight'>;
+export type BondStaticData = Omit<Bond, 'isin' | 'notional' | 'marketValue' | 'portfolioWeight' | 'durationContribution'>;
 
 // Data structure for a single bond holding in the portfolio
 export interface Bond extends KRDFields {
@@ -44,6 +44,7 @@ export interface Bond extends KRDFields {
   notional: number;
   marketValue: number; // Calculated field: notional * price / 100
   portfolioWeight: number; // Calculated field: marketValue / totalMarketValue
+  durationContribution: number; // Calculated field
   yieldToMaturity: number;
   modifiedDuration: number;
   creditRating: string;
@@ -75,13 +76,18 @@ export interface OptimizationParams {
   maxPositionSize: number;
   transactionCost: number;
   excludedBonds: string[]; // by isin
+  mode: 'switch' | 'buy-only';
 }
 
 export interface ProposedTrade {
   action: 'BUY' | 'SELL';
-  bondId: string; // isin
-  bondName: string;
-  amount: number;
+  isin: string;
+  name: string;
+  notional: number;
+  marketValue: number;
+  price: number;
+  modifiedDuration: number;
+  yieldToMaturity: number;
 }
 
 interface ImpactMetrics {
@@ -97,10 +103,19 @@ export interface OptimizationResult {
     before: ImpactMetrics;
     after: ImpactMetrics;
   };
-  estimatedCost: number;
+  estimatedCost: number; // This is now a dollar value, not bps.
+  rationale?: string;
 }
 
 // New type for application-wide user settings
 export interface AppSettings {
     durationGapThreshold: number;
+}
+
+// Type for hypothetical trades in sandbox
+export interface HypotheticalTrade {
+    isin: string;
+    name: string;
+    action: 'BUY' | 'SELL';
+    notional: number;
 }
