@@ -5,6 +5,7 @@ import { KpiCard } from '@/components/shared/KpiCard';
 import { KRD_TENORS } from '@/constants';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 import { calculateTrackingError } from '@/services/portfolioService';
+import { formatNumber, formatCurrency, formatCurrencyM } from '@/utils/formatting';
 
 interface DashboardProps {
   portfolio: Portfolio;
@@ -46,16 +47,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
 
   const durationDriftData = useMemo(() => {
     const data = [];
-    let currentDuration = portfolio.modifiedDuration;
-    // Monthly roll-down assumption: duration decreases by 1/12 each month.
-    const monthlyRollDown = 1 / 12;
+    const yieldDecimal = portfolio.averageYield / 100;
+
+    // Use a more accurate model based on Macaulay Duration
+    // 1. Estimate initial Macaulay Duration
+    const initialMacaulayDuration = portfolio.modifiedDuration * (1 + yieldDecimal);
+
     for (let i = 0; i <= 12; i++) {
+      // 2. Roll down Macaulay Duration
+      const futureMacaulayDuration = initialMacaulayDuration - (i / 12);
+      // 3. Convert back to Modified Duration
+      const futureModifiedDuration = futureMacaulayDuration / (1 + yieldDecimal);
+
       data.push({
         month: i,
-        'Portfolio Mod. Duration': currentDuration,
+        'Portfolio Mod. Duration': futureModifiedDuration,
         'Benchmark Mod. Duration': benchmark.modifiedDuration
       });
-      currentDuration -= monthlyRollDown;
     }
     return data;
   }, [portfolio, benchmark]);
@@ -72,7 +80,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
     return Object.entries(currencyValues).map(([name, value]) => ({ name, value }));
   }, [portfolio]);
 
-  const COLORS = ['#f97316', '#6366f1', '#14b8a6']; // Replaced purple with teal
+  const COLORS = ['#f97316', '#6366f1', '#14b8a6'];
 
   const krdComparisonData = useMemo(() => {
     return KRD_TENORS.map(t => {
@@ -94,23 +102,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <KpiCard
           title="Portfolio Duration"
-          value={portfolio.modifiedDuration.toFixed(2) + ' yrs'}
+          value={`${formatNumber(portfolio.modifiedDuration, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} yrs`}
           change={`Benchmark: ${benchmark.modifiedDuration.toFixed(2)} yrs`}
           changeColor="text-slate-400"
         />
         <KpiCard
           title="Duration Gap"
-          value={durationGap.toFixed(2) + ' yrs'}
+          value={`${formatNumber(durationGap, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} yrs`}
           changeColor={isDurationGapBreached ? 'text-red-400' : 'text-green-400'}
           change={isDurationGapBreached ? `Breached (>${durationGapThreshold}y)` : `Within (±${durationGapThreshold}y)`}
         />
         <KpiCard
           title="Projected Tracking Error"
-          value={trackingError.toFixed(2) + ' bps'}
+          value={`${formatNumber(trackingError, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} bps`}
         />
         <KpiCard
           title="Total Market Value"
-          value={`$${(portfolio.totalMarketValue / 1_000_000).toFixed(2)}M`}
+          value={formatCurrency(portfolio.totalMarketValue, 0, 0)}
         />
       </div>
 
@@ -125,7 +133,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
                 tick={{ fill: '#94a3b8' }} 
                 tickLine={{ stroke: '#94a3b8' }} 
                 domain={['dataMin', 'dataMax']} 
-                tickFormatter={(tick) => typeof tick === 'number' ? tick.toFixed(2) : tick}
+                tickFormatter={(tick) => formatNumber(tick, { minimumFractionDigits: 2, maximumFractionDigits: 2})}
               />
               <Tooltip content={<ChartTooltip />} />
               <Legend wrapperStyle={{ color: '#94a3b8' }} />
@@ -164,13 +172,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
                           fill="#8884d8"
                           dataKey="value"
                           nameKey="name"
-                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          label={({ name, percent }) => `${name} ${formatNumber(percent * 100, {maximumFractionDigits: 0})}%`}
                         >
                           {currencyData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip content={<ChartTooltip />} />
+                        <Tooltip formatter={(value: number) => formatCurrency(value, 0, 0)} />
                         <Legend wrapperStyle={{ color: '#94a3b8' }} />
                       </PieChart>
                     </ResponsiveContainer>
