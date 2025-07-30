@@ -27,6 +27,7 @@ export const buildPortfolio = (
       notional: holding.notional,
       marketValue,
       portfolioWeight: totalMarketValue > 0 ? marketValue / totalMarketValue : 0,
+      durationContribution: 0, // Placeholder, will be calculated in calculatePortfolioMetrics
     };
   }).filter(Boolean) as Bond[];
 };
@@ -87,21 +88,31 @@ export const calculatePortfolioMetrics = (bonds: Bond[]): Portfolio => {
       ...zeroKRDs,
     };
   }
+  
+  const bondsWithWeights = bonds.map(bond => ({
+      ...bond,
+      portfolioWeight: bond.marketValue / totalMarketValue,
+  }));
+  
+  const bondsWithMetrics = bondsWithWeights.map(bond => ({
+      ...bond,
+      durationContribution: bond.modifiedDuration * bond.portfolioWeight
+  }));
 
   const weight = (bond: Bond) => bond.marketValue / totalMarketValue;
 
-  const modifiedDuration = bonds.reduce((sum, bond) => sum + bond.modifiedDuration * weight(bond), 0);
+  const modifiedDuration = bondsWithMetrics.reduce((sum, bond) => sum + bond.modifiedDuration * weight(bond), 0);
   
-  const averageYield = bonds.reduce((sum, bond) => sum + bond.yieldToMaturity * weight(bond), 0);
+  const averageYield = bondsWithMetrics.reduce((sum, bond) => sum + bond.yieldToMaturity * weight(bond), 0);
   
   const krd = KRD_TENORS.reduce((acc, tenor) => {
     const krdKey: KrdKey = `krd_${tenor}`;
-    acc[krdKey] = bonds.reduce((sum, bond) => sum + bond[krdKey] * weight(bond), 0);
+    acc[krdKey] = bondsWithMetrics.reduce((sum, bond) => sum + bond[krdKey] * weight(bond), 0);
     return acc;
   }, {} as KRDFields);
 
   return { 
-      bonds, 
+      bonds: bondsWithMetrics, 
       totalMarketValue, 
       modifiedDuration,
       averageYield,
@@ -116,6 +127,26 @@ export const calculateScenarioPnl = (
   scenario: RateScenario,
   portfolioMarketValueForBenchmark: number
 ): { pnl: number, pnlPercent: number } => {
+  // This function calculates the estimated Profit & Loss (P&L) based on Key Rate Durations (KRDs).
+  // The formula is an industry-standard approximation for P&L from small interest rate changes:
+  // P&L ≈ -MarketValue * Σ(KRD_tenor * Δyield_tenor)
+  //
+  // Where:
+  // - MarketValue: The market value of the portfolio or benchmark.
+  // - KRD_tenor: The Key Rate Duration for a specific point on the yield curve (e.g., 2y, 5y, 10y).
+  //              It measures the sensitivity of the price to a 1% (100bps) change in that specific key rate.
+  // - Δyield_tenor: The change in yield for that tenor, in decimal form (e.g., 50 bps = 0.005).
+  //
+  // Why the negative sign?
+  // There's an inverse relationship between interest rates and bond prices.
+  // - If rates go UP (Δyield is positive), bond prices go DOWN, resulting in a negative P&L.
+  // - If rates go DOWN (Δyield is negative), bond prices go UP, resulting in a positive P&L.
+  // The negative sign in the formula correctly models this relationship.
+  //
+  // Regarding user query on underperformance:
+  // If Portfolio Duration < Benchmark Duration and rates FALL, the portfolio will gain LESS value than the benchmark.
+  // This results in negative Active P&L (underperformance), which is correct. The code implements this logic.
+  
   let pnl = 0;
   
   const entityMarketValue = 'totalMarketValue' in entity ? entity.totalMarketValue : portfolioMarketValueForBenchmark;
@@ -127,7 +158,6 @@ export const calculateScenarioPnl = (
     const rateChangeBps = scenario[tenor] || 0;
     if (rateChangeBps !== 0) {
       const krdValue = entity[krdKey];
-      // P&L ≈ -MarketValue * Σ(KRD_tenor * (yield_change_for_tenor_in_bps / 10000))
       pnl -= entityMarketValue * krdValue * (rateChangeBps / 10000);
     }
   });
