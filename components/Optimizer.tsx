@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData } from '@/types';
+import React, { useState, useCallback, useMemo } from 'react';
+import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData, ProposedTrade } from '@/types';
 import { Card } from '@/components/shared/Card';
 import { runOptimizer } from '@/services/optimizerService';
 
@@ -43,31 +43,53 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult }> = ({ result }) =>
         </div>
       </div>
 
-      <div>
+      <div className="lg:col-span-2">
         <h4 className="text-lg font-semibold text-slate-200 mb-3">Proposed Trades</h4>
         <div className="max-h-60 overflow-y-auto pr-2">
-          <ul className="divide-y divide-slate-800">
-            {result.proposedTrades.length > 0 ? result.proposedTrades.map((trade, index) => (
-              <li key={index} className="py-2.5">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <span className={`font-bold mr-3 ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</span>
-                    <span className="text-slate-300">{trade.bondName}</span>
-                  </div>
-                  <span className="font-mono text-slate-200">${trade.amount.toLocaleString()}</span>
-                </div>
-              </li>
-            )) : <li className="py-2.5 text-slate-500">No trades recommended. Portfolio is optimal.</li>}
-          </ul>
+          {result.proposedTrades.length > 0 ? (
+            <table className="min-w-full text-sm">
+                <thead className="border-b border-slate-700">
+                    <tr>
+                        <th className="py-2 text-left text-slate-400 font-semibold">Action</th>
+                        <th className="py-2 text-left text-slate-400 font-semibold">ISIN</th>
+                        <th className="py-2 text-left text-slate-400 font-semibold">Name</th>
+                        <th className="py-2 text-right text-slate-400 font-semibold">M.Val ($)</th>
+                        <th className="py-2 text-right text-slate-400 font-semibold">Notional</th>
+                        <th className="py-2 text-right text-slate-400 font-semibold">Dur</th>
+                        <th className="py-2 text-right text-slate-400 font-semibold">YTM</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                    {result.proposedTrades.map((trade: ProposedTrade, index) => (
+                      <tr key={index}>
+                          <td className={`py-2.5 font-bold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
+                          <td className="py-2.5 font-mono text-orange-400">{trade.isin}</td>
+                          <td className="py-2.5 text-slate-300 truncate max-w-xs">{trade.name}</td>
+                          <td className="py-2.5 font-mono text-slate-200 text-right">{trade.marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                          <td className="py-2.5 font-mono text-slate-200 text-right">{trade.notional.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                          <td className="py-2.5 font-mono text-slate-200 text-right">{trade.modifiedDuration.toFixed(2)}</td>
+                          <td className="py-2.5 font-mono text-slate-200 text-right">{trade.yieldToMaturity.toFixed(2)}%</td>
+                      </tr>
+                    ))}
+                </tbody>
+            </table>
+          ) : <p className="py-2.5 text-slate-500">No trades recommended. Portfolio is optimal.</p>}
         </div>
       </div>
+      
+       {result.rationale && (
+          <div className="lg:col-span-2 border-t border-slate-800 pt-4">
+            <h4 className="text-lg font-semibold text-slate-200 mb-2">Rationale</h4>
+            <p className="text-sm text-slate-400 bg-slate-950 p-3 rounded-md">{result.rationale}</p>
+          </div>
+        )}
 
       <div className="lg:col-span-2 border-t border-slate-800 pt-4">
         <h4 className="text-lg font-semibold text-slate-200 mb-3">Cost-Benefit Summary</h4>
          <div className="flex justify-around items-center bg-slate-950 p-3 rounded-md">
             <div className="text-center">
-                <p className="text-sm text-slate-400">Est. Transaction Cost</p>
-                <p className="text-xl font-mono text-orange-400">{result.estimatedCost?.toFixed(2) ?? 'N/A'} bps</p>
+                <p className="text-sm text-slate-400">Est. Transaction Cost ($)</p>
+                <p className="text-xl font-mono text-orange-400">${result.estimatedCost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2}) ?? 'N/A'}</p>
             </div>
             <div className="h-12 w-px bg-slate-700"></div>
             <div className="text-center">
@@ -90,10 +112,17 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     maxPositionSize: 20,
     transactionCost: 5,
     excludedBonds: [],
+    mode: 'switch',
   });
+  
+  // Local state for string inputs to avoid leading zero issue
+  const [turnoverStr, setTurnoverStr] = useState(params.maxTurnover.toString());
+  const [costStr, setCostStr] = useState(params.transactionCost.toString());
+  
   const [result, setResult] = useState<OptimizationResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [eligibilitySearch, setEligibilitySearch] = useState('');
 
   const handleParamChange = (field: keyof OptimizationParams, value: any) => {
     setParams(prev => ({ ...prev, [field]: value }));
@@ -124,6 +153,15 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         }
     }, 500);
   }, [portfolio, benchmark, params, bondMasterData]);
+  
+  const filteredBonds = useMemo(() => {
+      if (!eligibilitySearch) return portfolio.bonds;
+      return portfolio.bonds.filter(b => 
+          b.name.toLowerCase().includes(eligibilitySearch.toLowerCase()) ||
+          b.isin.toLowerCase().includes(eligibilitySearch.toLowerCase())
+      );
+  }, [portfolio.bonds, eligibilitySearch]);
+
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
@@ -135,19 +173,40 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             <div className="space-y-4">
               <div>
                 <label htmlFor="maxTurnover" className="block text-sm font-medium text-slate-300">Max Turnover (%)</label>
-                <input type="number" id="maxTurnover" value={params.maxTurnover} onChange={e => handleParamChange('maxTurnover', Number(e.target.value))} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                <input type="number" id="maxTurnover" value={turnoverStr} onChange={e => {
+                  setTurnoverStr(e.target.value);
+                  handleParamChange('maxTurnover', Number(e.target.value));
+                }} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
               </div>
               <div>
-                <label htmlFor="transactionCost" className="block text-sm font-medium text-slate-300">Transaction Cost (bps)</label>
-                <input type="number" id="transactionCost" value={params.transactionCost} onChange={e => handleParamChange('transactionCost', Number(e.target.value))} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                <label htmlFor="transactionCost" className="block text-sm font-medium text-slate-300">Volumetric Transaction Cost (bps)</label>
+                <input type="number" id="transactionCost" value={costStr} onChange={e => {
+                  setCostStr(e.target.value);
+                  handleParamChange('transactionCost', Number(e.target.value));
+                }} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+              </div>
+              <div>
+                <span className="block text-sm font-medium text-slate-300">Optimisation Mode</span>
+                 <div className="mt-2 grid grid-cols-2 gap-2 rounded-md bg-slate-800 p-1">
+                    <button onClick={() => handleParamChange('mode', 'switch')} className={`px-3 py-1.5 text-sm font-semibold rounded ${params.mode === 'switch' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Switch Trades</button>
+                    <button onClick={() => handleParamChange('mode', 'buy-only')} className={`px-3 py-1.5 text-sm font-semibold rounded ${params.mode === 'buy-only' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Buy Only</button>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">{params.mode === 'switch' ? 'Assumes cash-neutral trades (sell to buy).' : 'Assumes fund inflow (only buy trades).'}</p>
               </div>
             </div>
           </Card>
           <Card>
-            <h3 className="text-lg font-semibold text-slate-200 mb-4">Bond Eligibility</h3>
+            <h3 className="text-lg font-semibold text-slate-200 mb-2">Bond Eligibility</h3>
             <p className="text-sm text-slate-500 mb-3">Untick bonds to exclude them from being sold in the optimisation.</p>
-            <div className="max-h-96 overflow-y-auto space-y-1 pr-2 border-t border-slate-800 pt-2">
-              {portfolio.bonds.map(bond => (
+            <input 
+                type="text" 
+                placeholder="Search by ISIN or name..."
+                value={eligibilitySearch}
+                onChange={e => setEligibilitySearch(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none mb-3"
+            />
+            <div className="max-h-80 overflow-y-auto space-y-1 pr-2 border-t border-slate-800 pt-2">
+              {filteredBonds.map(bond => (
                   <div key={bond.isin} className="flex items-center p-1 rounded-md hover:bg-slate-800">
                       <input
                           id={`exclude-${bond.isin}`}
