@@ -8,8 +8,9 @@ interface PortfolioDetailProps {
   portfolio: Portfolio;
 }
 
-type SortKey = keyof Bond | 'isin';
+type SortKey = keyof Omit<Bond, 'krd_1y' | 'krd_2y' | 'krd_3y' | 'krd_5y' | 'krd_7y' | 'krd_10y'>;
 type SortDirection = 'asc' | 'desc';
+
 
 const SortableHeader: React.FC<{
   label: string;
@@ -74,9 +75,11 @@ export const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio }) =
         bond.isin.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
+    
     bonds.sort((a, b) => {
       const aVal = a[sortKey];
       const bVal = b[sortKey];
+
       if (typeof aVal === 'number' && typeof bVal === 'number') {
         return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
       }
@@ -91,7 +94,7 @@ export const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio }) =
   const durationContributionData = useMemo(() => {
       return portfolio.bonds.map(bond => ({
           name: bond.name,
-          contribution: (bond.modifiedDuration * bond.marketValue) / portfolio.totalMarketValue,
+          contribution: bond.durationContribution,
       })).sort((a,b) => b.contribution - a.contribution).slice(0,10); // Top 10 contributors
   }, [portfolio]);
 
@@ -136,7 +139,7 @@ export const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio }) =
                       <Legend wrapperStyle={{ color: '#94a3b8' }} />
                       <Bar dataKey="USD" stackId="a" fill="#f97316" />
                       <Bar dataKey="EUR" stackId="a" fill="#6366f1" />
-                      <Bar dataKey="GBP" stackId="a" fill="#a855f7" />
+                      <Bar dataKey="GBP" stackId="a" fill="#14b8a6" />
                   </BarChart>
               </ResponsiveContainer>
           </Card>
@@ -166,6 +169,7 @@ export const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio }) =
                 <SortableHeader label="Cpn" sortKey="coupon" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
                 <SortableHeader label="YTM" sortKey="yieldToMaturity" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
                 <SortableHeader label="Mod.Dur" sortKey="modifiedDuration" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
+                <SortableHeader label="Dur. Cont." sortKey="durationContribution" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
                 <SortableHeader label="Rating" sortKey="creditRating" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
                 {KRD_TENORS.map(tenor => <th key={tenor} className="px-3 py-3 text-right text-xs font-medium text-slate-300 uppercase tracking-wider">{tenor}</th>)}
               </tr>
@@ -176,14 +180,15 @@ export const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio }) =
                   <td className="px-3 py-3 text-sm font-mono text-orange-400 whitespace-nowrap">{bond.isin}</td>
                   <td className="px-3 py-3 text-sm text-slate-200 whitespace-nowrap">{bond.name}</td>
                   <td className="px-3 py-3 text-sm text-right whitespace-nowrap">{bond.notional.toLocaleString()}</td>
-                  <td className="px-3 py-3 text-sm text-right whitespace-nowrap">{(bond.marketValue / 1e6).toFixed(1)}M</td>
+                  <td className="px-3 py-3 text-sm text-right whitespace-nowrap">{(bond.marketValue / 1e6).toFixed(3)}M</td>
                   <td className="px-3 py-3 text-sm text-center">{bond.currency}</td>
                   <td className="px-3 py-3 text-sm whitespace-nowrap">{bond.maturityDate}</td>
-                  <td className="px-3 py-3 text-sm text-right">{bond.coupon.toFixed(3)}%</td>
+                  <td className="px-3 py-3 text-sm text-right">{bond.coupon.toFixed(2)}%</td>
                   <td className="px-3 py-3 text-sm text-right">{bond.yieldToMaturity.toFixed(2)}%</td>
                   <td className="px-3 py-3 text-sm text-right">{bond.modifiedDuration.toFixed(2)}</td>
+                  <td className="px-3 py-3 text-sm text-right">{bond.durationContribution.toFixed(3)}</td>
                   <td className="px-3 py-3 text-sm text-center">{bond.creditRating}</td>
-                   {KRD_TENORS.map(tenor => <td key={tenor} className="px-3 py-3 text-sm text-right">{bond[`krd_${tenor}`].toFixed(2)}</td>)}
+                   {KRD_TENORS.map(tenor => <td key={tenor} className="px-3 py-3 text-sm text-right">{bond[`krd_${tenor}`].toFixed(3)}</td>)}
                 </tr>
               ))}
             </tbody>
