@@ -3,6 +3,7 @@ import { Portfolio, Bond, KrdKey } from '@/types';
 import { KRD_TENORS } from '@/constants';
 import { Card } from '@/components/shared/Card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { formatNumber, formatCurrencyM } from '@/utils/formatting';
 
 interface PortfolioDetailProps {
   portfolio: Portfolio;
@@ -44,7 +45,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
         <p className="label text-slate-200">{`${label}`}</p>
         {payload.map((pld: any, index: number) => (
           <p key={index} style={{ color: pld.color }} className="text-sm">
-            {`${pld.name}: ${pld.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2})}`}
+            {`${pld.name}: ${formatNumber(pld.value, { minimumFractionDigits: 2, maximumFractionDigits: 2})}`}
           </p>
         ))}
       </div>
@@ -162,15 +163,15 @@ export const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio }) =
               <tr>
                 <SortableHeader label="ISIN" sortKey="isin" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
                 <SortableHeader label="Bond Name" sortKey="name" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
-                <SortableHeader label="Notional" sortKey="notional" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
-                <SortableHeader label="M.Val" sortKey="marketValue" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
-                <SortableHeader label="Ccy" sortKey="currency" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
+                <SortableHeader label="Notional" sortKey="notional" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} className="text-right" />
+                <SortableHeader label="M.Val" sortKey="marketValue" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} className="text-right" />
+                <SortableHeader label="Ccy" sortKey="currency" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} className="text-center"/>
                 <SortableHeader label="Maturity" sortKey="maturityDate" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
-                <SortableHeader label="Cpn" sortKey="coupon" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
-                <SortableHeader label="YTM" sortKey="yieldToMaturity" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
-                <SortableHeader label="Mod.Dur" sortKey="modifiedDuration" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
-                <SortableHeader label="Dur. Cont." sortKey="durationContribution" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
-                <SortableHeader label="Rating" sortKey="creditRating" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
+                <SortableHeader label="Cpn" sortKey="coupon" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} className="text-right" />
+                <SortableHeader label="YTM" sortKey="yieldToMaturity" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} className="text-right" />
+                <SortableHeader label="Mod.Dur" sortKey="modifiedDuration" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} className="text-right" />
+                <SortableHeader label="Dur. Cont." sortKey="durationContribution" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} className="text-right" />
+                <SortableHeader label="Rating" sortKey="creditRating" currentSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} className="text-center"/>
                 {KRD_TENORS.map(tenor => <th key={tenor} className="px-3 py-3 text-right text-xs font-medium text-slate-300 uppercase tracking-wider">{tenor}</th>)}
               </tr>
             </thead>
@@ -178,17 +179,17 @@ export const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio }) =
               {sortedAndFilteredBonds.map(bond => (
                 <tr key={bond.isin} className="hover:bg-slate-800/50">
                   <td className="px-3 py-3 text-sm font-mono text-orange-400 whitespace-nowrap">{bond.isin}</td>
-                  <td className="px-3 py-3 text-sm text-slate-200 whitespace-nowrap">{bond.name}</td>
-                  <td className="px-3 py-3 text-sm text-right whitespace-nowrap">{bond.notional.toLocaleString()}</td>
-                  <td className="px-3 py-3 text-sm text-right whitespace-nowrap">{(bond.marketValue / 1e6).toFixed(3)}M</td>
+                  <td className="px-3 py-3 text-sm text-slate-200 whitespace-nowrap max-w-xs truncate">{bond.name}</td>
+                  <td className="px-3 py-3 text-sm text-right whitespace-nowrap font-mono">{formatNumber(bond.notional)}</td>
+                  <td className="px-3 py-3 text-sm text-right whitespace-nowrap font-mono">{formatCurrencyM(bond.marketValue)}</td>
                   <td className="px-3 py-3 text-sm text-center">{bond.currency}</td>
                   <td className="px-3 py-3 text-sm whitespace-nowrap">{bond.maturityDate}</td>
-                  <td className="px-3 py-3 text-sm text-right">{bond.coupon.toFixed(2)}%</td>
-                  <td className="px-3 py-3 text-sm text-right">{bond.yieldToMaturity.toFixed(2)}%</td>
-                  <td className="px-3 py-3 text-sm text-right">{bond.modifiedDuration.toFixed(2)}</td>
-                  <td className="px-3 py-3 text-sm text-right">{bond.durationContribution.toFixed(3)}</td>
+                  <td className="px-3 py-3 text-sm text-right font-mono">{formatNumber(bond.coupon, {minimumFractionDigits: 2})}%</td>
+                  <td className="px-3 py-3 text-sm text-right font-mono">{formatNumber(bond.yieldToMaturity, {minimumFractionDigits: 2})}%</td>
+                  <td className="px-3 py-3 text-sm text-right font-mono">{formatNumber(bond.modifiedDuration, {minimumFractionDigits: 2})}</td>
+                  <td className="px-3 py-3 text-sm text-right font-mono">{formatNumber(bond.durationContribution, {minimumFractionDigits: 3})}</td>
                   <td className="px-3 py-3 text-sm text-center">{bond.creditRating}</td>
-                   {KRD_TENORS.map(tenor => <td key={tenor} className="px-3 py-3 text-sm text-right">{bond[`krd_${tenor}`].toFixed(3)}</td>)}
+                   {KRD_TENORS.map(tenor => <td key={tenor} className="px-3 py-3 text-sm text-right font-mono">{formatNumber(bond[`krd_${tenor}`], {minimumFractionDigits: 3})}</td>)}
                 </tr>
               ))}
             </tbody>
