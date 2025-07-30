@@ -47,14 +47,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
   const durationDriftData = useMemo(() => {
     const data = [];
     let currentDuration = portfolio.modifiedDuration;
+    // Monthly roll-down assumption: duration decreases by 1/12 each month.
+    const monthlyRollDown = 1 / 12;
     for (let i = 0; i <= 12; i++) {
       data.push({
         month: i,
         'Portfolio Mod. Duration': currentDuration,
         'Benchmark Mod. Duration': benchmark.modifiedDuration
       });
-      // A simplified drift calculation for illustrative purposes
-      currentDuration -= (portfolio.modifiedDuration / (portfolio.modifiedDuration * 12)) / 12 * i;
+      currentDuration -= monthlyRollDown;
     }
     return data;
   }, [portfolio, benchmark]);
@@ -71,7 +72,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
     return Object.entries(currencyValues).map(([name, value]) => ({ name, value }));
   }, [portfolio]);
 
-  const COLORS = ['#f97316', '#6366f1', '#a855f7'];
+  const COLORS = ['#f97316', '#6366f1', '#14b8a6']; // Replaced purple with teal
 
   const krdComparisonData = useMemo(() => {
     return KRD_TENORS.map(t => {
@@ -120,7 +121,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
             <LineChart data={durationDriftData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="month" tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }} />
-              <YAxis tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }} domain={['dataMin - 0.1', 'dataMax + 0.1']} />
+              <YAxis 
+                tick={{ fill: '#94a3b8' }} 
+                tickLine={{ stroke: '#94a3b8' }} 
+                domain={['dataMin', 'dataMax']} 
+                tickFormatter={(tick) => typeof tick === 'number' ? tick.toFixed(2) : tick}
+              />
               <Tooltip content={<ChartTooltip />} />
               <Legend wrapperStyle={{ color: '#94a3b8' }} />
               <Line type="monotone" dataKey="Portfolio Mod. Duration" stroke="#f97316" strokeWidth={2} dot={false} />
