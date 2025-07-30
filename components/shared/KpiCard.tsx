@@ -1,9 +1,10 @@
 import React from 'react';
 import { Card } from './Card';
+import { formatNumber } from '@/utils/formatting';
 
 interface KpiCardProps {
   title: string;
-  value: string;
+  value: string | number;
   change?: string;
   changeColor?: string;
   icon?: React.ReactNode;
@@ -11,6 +12,8 @@ interface KpiCardProps {
 }
 
 export const KpiCard: React.FC<KpiCardProps> = ({ title, value, change, changeColor, icon, className }) => {
+  const displayValue = typeof value === 'number' ? formatNumber(value) : value;
+
   return (
     <Card className={`flex flex-col justify-between ${className}`}>
       <div className="flex justify-between items-start">
@@ -18,7 +21,7 @@ export const KpiCard: React.FC<KpiCardProps> = ({ title, value, change, changeCo
         {icon}
       </div>
       <div>
-        <p className="text-3xl font-bold text-slate-100 mt-2">{value}</p>
+        <p className="text-3xl font-bold text-slate-100 mt-2">{displayValue}</p>
         {change && (
           <p className={`text-sm mt-1 ${changeColor}`}>
             {change}
