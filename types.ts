@@ -103,7 +103,9 @@ export interface OptimizationResult {
     before: ImpactMetrics;
     after: ImpactMetrics;
   };
-  estimatedCost: number; // This is now a dollar value, not bps.
+  estimatedCost: number; // Dollar value
+  estimatedCostBpsOfNav: number; // Cost as bps of total portfolio value
+  estimatedCostBpsPerTradeSum: number; // Sum of per-trade bps costs
   rationale?: string;
 }
 
