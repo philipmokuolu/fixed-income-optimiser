@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData, ProposedTrade } from '@/types';
 import { Card } from '@/components/shared/Card';
 import { runOptimizer } from '@/services/optimizerService';
+import { formatNumber, formatCurrency } from '@/utils/formatting';
 
 interface OptimiserProps {
   portfolio: Portfolio;
@@ -34,9 +35,9 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult }> = ({ result }) =>
             <div key={key}>
               <p className="text-sm text-slate-400">{key}</p>
               <div className="flex items-center space-x-4">
-                <p className="text-lg font-mono text-slate-300 w-32 text-right">{b.toFixed(2)} {u}</p>
+                <p className="text-lg font-mono text-slate-300 w-32 text-right">{formatNumber(b, {minimumFractionDigits: 2})} {u}</p>
                 <span className="text-orange-400 font-bold text-xl">→</span>
-                <p className="text-lg font-mono text-green-400 w-32 text-right">{a.toFixed(2)} {u}</p>
+                <p className="text-lg font-mono text-green-400 w-32 text-right">{formatNumber(a, {minimumFractionDigits: 2})} {u}</p>
               </div>
             </div>
           ))}
@@ -53,8 +54,9 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult }> = ({ result }) =>
                         <th className="py-2 text-left text-slate-400 font-semibold">Action</th>
                         <th className="py-2 text-left text-slate-400 font-semibold">ISIN</th>
                         <th className="py-2 text-left text-slate-400 font-semibold">Name</th>
-                        <th className="py-2 text-right text-slate-400 font-semibold">M.Val ($)</th>
+                        <th className="py-2 text-right text-slate-400 font-semibold">M.Val</th>
                         <th className="py-2 text-right text-slate-400 font-semibold">Notional</th>
+                        <th className="py-2 text-right text-slate-400 font-semibold">Price</th>
                         <th className="py-2 text-right text-slate-400 font-semibold">Dur</th>
                         <th className="py-2 text-right text-slate-400 font-semibold">YTM</th>
                     </tr>
@@ -65,10 +67,11 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult }> = ({ result }) =>
                           <td className={`py-2.5 font-bold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
                           <td className="py-2.5 font-mono text-orange-400">{trade.isin}</td>
                           <td className="py-2.5 text-slate-300 truncate max-w-xs">{trade.name}</td>
-                          <td className="py-2.5 font-mono text-slate-200 text-right">{trade.marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                          <td className="py-2.5 font-mono text-slate-200 text-right">{trade.notional.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                          <td className="py-2.5 font-mono text-slate-200 text-right">{trade.modifiedDuration.toFixed(2)}</td>
-                          <td className="py-2.5 font-mono text-slate-200 text-right">{trade.yieldToMaturity.toFixed(2)}%</td>
+                          <td className="py-2.5 font-mono text-slate-200 text-right">{formatCurrency(trade.marketValue, 0, 0)}</td>
+                          <td className="py-2.5 font-mono text-slate-200 text-right">{formatNumber(trade.notional, {maximumFractionDigits: 0})}</td>
+                          <td className="py-2.5 font-mono text-slate-200 text-right">{formatNumber(trade.price, {minimumFractionDigits: 2})}</td>
+                          <td className="py-2.5 font-mono text-slate-200 text-right">{formatNumber(trade.modifiedDuration, {minimumFractionDigits: 2})}</td>
+                          <td className="py-2.5 font-mono text-slate-200 text-right">{formatNumber(trade.yieldToMaturity, {minimumFractionDigits: 2})}%</td>
                       </tr>
                     ))}
                 </tbody>
@@ -86,16 +89,23 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult }> = ({ result }) =>
 
       <div className="lg:col-span-2 border-t border-slate-800 pt-4">
         <h4 className="text-lg font-semibold text-slate-200 mb-3">Cost-Benefit Summary</h4>
-         <div className="flex justify-around items-center bg-slate-950 p-3 rounded-md">
+         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-950 p-3 rounded-md">
             <div className="text-center">
-                <p className="text-sm text-slate-400">Est. Transaction Cost ($)</p>
-                <p className="text-xl font-mono text-orange-400">${result.estimatedCost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2}) ?? 'N/A'}</p>
+                <p className="text-sm text-slate-400">Total Cost ($)</p>
+                <p className="text-xl font-mono text-orange-400">{formatCurrency(result.estimatedCost, 2, 2)}</p>
             </div>
-            <div className="h-12 w-px bg-slate-700"></div>
             <div className="text-center">
-                <p className="text-sm text-slate-400">Tracking Error Reduction</p>
+                <p className="text-sm text-slate-400">Cost (bps of NAV)</p>
+                <p className="text-xl font-mono text-orange-400">{formatNumber(result.estimatedCostBpsOfNav, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            </div>
+             <div className="text-center">
+                <p className="text-sm text-slate-400">Aggregate Trade Cost (bps)</p>
+                <p className="text-xl font-mono text-orange-400">{formatNumber(result.estimatedCostBpsPerTradeSum)}</p>
+            </div>
+            <div className="text-center md:col-span-3 border-t border-slate-700 pt-3 mt-2">
+                <p className="text-sm text-slate-400">Projected Tracking Error Reduction</p>
                 <p className="text-xl font-mono text-green-400">
-                    {(result.impactAnalysis.before.trackingError - result.impactAnalysis.after.trackingError).toFixed(2)} bps
+                    {formatNumber(result.impactAnalysis.before.trackingError - result.impactAnalysis.after.trackingError, {minimumFractionDigits: 2})} bps
                 </p>
             </div>
         </div>
@@ -115,7 +125,6 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     mode: 'switch',
   });
   
-  // Local state for string inputs to avoid leading zero issue
   const [turnoverStr, setTurnoverStr] = useState(params.maxTurnover.toString());
   const [costStr, setCostStr] = useState(params.transactionCost.toString());
   
@@ -141,10 +150,12 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     setIsLoading(true);
     setError(null);
     setResult(null);
-    // Simulate async calculation for better UX
     setTimeout(() => {
         try {
-          const res = runOptimizer(portfolio, benchmark, params, bondMasterData);
+          const turnoverNum = Number(turnoverStr);
+          const costNum = Number(costStr);
+          const finalParams = { ...params, maxTurnover: turnoverNum, transactionCost: costNum };
+          const res = runOptimizer(portfolio, benchmark, finalParams, bondMasterData);
           setResult(res);
         } catch (err: any) {
           setError(err.message || 'An unknown error occurred during calculation.');
@@ -152,7 +163,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
           setIsLoading(false);
         }
     }, 500);
-  }, [portfolio, benchmark, params, bondMasterData]);
+  }, [portfolio, benchmark, params, bondMasterData, turnoverStr, costStr]);
   
   const filteredBonds = useMemo(() => {
       if (!eligibilitySearch) return portfolio.bonds;
@@ -173,17 +184,11 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             <div className="space-y-4">
               <div>
                 <label htmlFor="maxTurnover" className="block text-sm font-medium text-slate-300">Max Turnover (%)</label>
-                <input type="number" id="maxTurnover" value={turnoverStr} onChange={e => {
-                  setTurnoverStr(e.target.value);
-                  handleParamChange('maxTurnover', Number(e.target.value));
-                }} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                <input type="number" id="maxTurnover" value={turnoverStr} onChange={e => setTurnoverStr(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
               </div>
               <div>
-                <label htmlFor="transactionCost" className="block text-sm font-medium text-slate-300">Volumetric Transaction Cost (bps)</label>
-                <input type="number" id="transactionCost" value={costStr} onChange={e => {
-                  setCostStr(e.target.value);
-                  handleParamChange('transactionCost', Number(e.target.value));
-                }} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                <label htmlFor="transactionCost" className="block text-sm font-medium text-slate-300">Transaction Cost per Trade (bps)</label>
+                <input type="number" id="transactionCost" value={costStr} onChange={e => setCostStr(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
               </div>
               <div>
                 <span className="block text-sm font-medium text-slate-300">Optimisation Mode</span>
