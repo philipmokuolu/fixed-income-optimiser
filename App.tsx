@@ -102,7 +102,7 @@ const App: React.FC = () => {
       case 'optimiser':
         return <Optimiser portfolio={portfolio} benchmark={benchmark} bondMasterData={bondMasterData}/>;
       case 'sandbox':
-        return <Sandbox portfolio={portfolio} benchmark={benchmark} />;
+        return <Sandbox portfolio={portfolio} benchmark={benchmark} bondMasterData={bondMasterData} />;
       case 'datahub':
         return <DataHub onDataUploaded={loadAppData} />;
       default:
