@@ -1,4 +1,5 @@
 
+
 export const parseCsvToJson = <T>(
     file: File,
     expectedHeaders: string[]
@@ -29,20 +30,38 @@ export const parseCsvToJson = <T>(
                 return reject(new Error(`CSV is missing required headers: ${missingHeaders.join(', ')}`));
             }
             
+            // Map header names to their column index for efficient lookup and to ignore extra columns.
+            const headerIndexMap: Record<string, number> = {};
+            header.forEach((h, index) => {
+                headerIndexMap[h] = index;
+            });
+
             const jsonResult: T[] = [];
+            const errorStrings = new Set(['#N/A', '#VALUE!', '#REF!', '#DIV/0!', '#NUM!', '#NAME?', '#NULL!']);
 
             for (let i = 1; i < lines.length; i++) {
                 const values = lines[i].split(',');
                 const obj: any = {};
-                for(let j = 0; j < header.length; j++) {
-                    const key = header[j];
-                    const value = values[j]?.trim() || '';
+                
+                // Iterate only over the headers we expect, not all headers in the file.
+                for (const key of expectedHeaders) {
+                    const index = headerIndexMap[key];
 
-                    // Attempt to convert to number if it looks like one
-                    if (!isNaN(Number(value)) && value !== '') {
-                        obj[key] = Number(value);
-                    } else {
-                        obj[key] = value;
+                    // Only process if the expected header exists in the file.
+                    if (index !== undefined) { 
+                        const value = values[index]?.trim() || '';
+                        const isNumericError = errorStrings.has(value.toUpperCase());
+
+                        if (isNumericError) {
+                            // It's a recognized error string like #N/A. Default to 0 to prevent calculation errors.
+                            obj[key] = 0;
+                        } else if (!isNaN(Number(value)) && value !== '') {
+                            // It's a valid number.
+                            obj[key] = Number(value);
+                        } else {
+                            // It's a regular string (like 'Apple Inc' or 'AA+').
+                            obj[key] = value;
+                        }
                     }
                 }
                 jsonResult.push(obj as T);
