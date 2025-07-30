@@ -24,17 +24,19 @@ export const parseCsvToJson = <T>(
                 return reject(new Error("CSV must contain a header row and at least one data row."));
             }
 
-            const header = lines[0].split(',').map(h => h.trim());
-            const missingHeaders = expectedHeaders.filter(h => !header.includes(h));
+            const fileHeaders = lines[0].split(',').map(h => h.trim());
+            
+            // Create a map from the lowercase version of the file's headers to their original column index.
+            const headerIndexMap: Record<string, number> = {};
+            fileHeaders.forEach((h, index) => {
+                headerIndexMap[h.toLowerCase()] = index;
+            });
+
+            // Perform a case-insensitive check for missing headers.
+            const missingHeaders = expectedHeaders.filter(h => headerIndexMap[h.toLowerCase()] === undefined);
             if (missingHeaders.length > 0) {
                 return reject(new Error(`CSV is missing required headers: ${missingHeaders.join(', ')}`));
             }
-            
-            // Map header names to their column index for efficient lookup and to ignore extra columns.
-            const headerIndexMap: Record<string, number> = {};
-            header.forEach((h, index) => {
-                headerIndexMap[h] = index;
-            });
 
             const jsonResult: T[] = [];
             const errorStrings = new Set(['#N/A', '#VALUE!', '#REF!', '#DIV/0!', '#NUM!', '#NAME?', '#NULL!']);
@@ -43,24 +45,25 @@ export const parseCsvToJson = <T>(
                 const values = lines[i].split(',');
                 const obj: any = {};
                 
-                // Iterate only over the headers we expect, not all headers in the file.
-                for (const key of expectedHeaders) {
-                    const index = headerIndexMap[key];
+                // Iterate over the headers the app expects to build the object.
+                for (const expectedKey of expectedHeaders) {
+                    // Find the column index using the lowercase version of the expected key.
+                    const index = headerIndexMap[expectedKey.toLowerCase()];
 
-                    // Only process if the expected header exists in the file.
+                    // Only process if the expected header exists in the file (it should, due to the check above).
                     if (index !== undefined) { 
                         const value = values[index]?.trim() || '';
                         const isNumericError = errorStrings.has(value.toUpperCase());
 
                         if (isNumericError) {
                             // It's a recognized error string like #N/A. Default to 0 to prevent calculation errors.
-                            obj[key] = 0;
+                             obj[expectedKey] = 0;
                         } else if (!isNaN(Number(value)) && value !== '') {
                             // It's a valid number.
-                            obj[key] = Number(value);
+                             obj[expectedKey] = Number(value);
                         } else {
-                            // It's a regular string (like 'Apple Inc' or 'AA+').
-                            obj[key] = value;
+                            // It's a regular string. Use the application's expected casing for the final object key.
+                             obj[expectedKey] = value;
                         }
                     }
                 }
