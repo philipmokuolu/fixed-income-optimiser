@@ -2,7 +2,7 @@ import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, KrdKey, K
 import { calculatePortfolioMetrics, calculateTrackingError } from './portfolioService';
 
 const MIN_TRADE_SIZE = 1000; // Minimum trade size in currency to be considered
-const MAX_ITERATIONS = 20; // Prevent infinite loops
+const MAX_ITERATIONS = 50; // Prevent infinite loops, increased for more trades
 
 const calculateImpactMetrics = (portfolio: Portfolio, benchmark: Benchmark) => {
     return {
@@ -32,7 +32,7 @@ const applyTradesToPortfolio = (
     currentBonds: Bond[], 
     tradesToApply: ProposedTrade[],
     bondMasterData: Record<string, BondStaticData>
-): Portfolio => {
+): Bond[] => {
     const newBondsMap = new Map<string, Bond>();
     currentBonds.forEach(bond => newBondsMap.set(bond.isin, { ...bond }));
 
@@ -65,7 +65,7 @@ const applyTradesToPortfolio = (
        }
     });
     
-    return calculatePortfolioMetrics(Array.from(newBondsMap.values()));
+    return calculatePortfolioMetrics(Array.from(newBondsMap.values())).bonds;
 }
 
 
@@ -84,10 +84,6 @@ export const runOptimizer = (
         estimatedCost: 0, estimatedCostBpsOfNav: 0, estimatedCostBpsPerTradeSum: 0,
     };
 
-    if (beforeMetrics.trackingError < 2 && Math.abs(beforeMetrics.durationGap) < params.durationGapThreshold) {
-        return { ...emptyResult, rationale: "Portfolio is already well-aligned with the benchmark. No trades needed." };
-    }
-
     let remainingTurnover = (params.maxTurnover / 100) * initialPortfolio.totalMarketValue;
     let proposedTrades: ProposedTrade[] = [];
     let currentBonds = [...initialPortfolio.bonds];
@@ -97,6 +93,13 @@ export const runOptimizer = (
     const buyUniverse = Object.entries(bondMasterData)
         .filter(([isin]) => !portfolioIsins.has(isin))
         .map(([isin, staticData]) => ({ ...staticData, isin } as Bond & BondStaticData));
+    
+    const isInitialDurationGapBreached = Math.abs(beforeMetrics.durationGap) > params.durationGapThreshold;
+     if (isInitialDurationGapBreached) {
+        rationaleParts.push(`Primary Objective: Correct the duration gap of ${beforeMetrics.durationGap.toFixed(2)} yrs.`);
+    } else {
+        rationaleParts.push("Primary Objective: Minimize KRD-based tracking error while respecting duration constraints.");
+    }
     
     // --- Main Optimization Loop ---
     while (remainingTurnover > MIN_TRADE_SIZE && iterations < MAX_ITERATIONS) {
@@ -110,40 +113,43 @@ export const runOptimizer = (
             break;
         }
 
+        let tradeMadeInThisIteration = false;
+
         const isDurationGapBreached = Math.abs(currentMetrics.durationGap) > params.durationGapThreshold;
         
         // ** PRIMARY OBJECTIVE: Fix Duration Gap **
         if (isDurationGapBreached && params.mode === 'switch') {
-            if (iterations === 1) rationaleParts.push(`Primary Objective: Correct the duration gap of ${currentMetrics.durationGap.toFixed(2)} yrs.`);
-            
             const isPortfolioShort = currentMetrics.durationGap < 0;
-            const tradeAmount = Math.min(remainingTurnover / 2, initialPortfolio.totalMarketValue * 0.05); // Use 5% of portfolio value per trade leg to avoid huge single trades
+            const idealTradeAmount = Math.min(remainingTurnover / 2, initialPortfolio.totalMarketValue * 0.05); // Use 5% of portfolio value per trade leg
             
             let bondToSell: Bond | undefined;
             let bondToBuy: (BondStaticData & Bond) | undefined;
 
-            if (isPortfolioShort) {
+            if (isPortfolioShort) { // Need to INCREASE duration
                 bondToSell = eligibleToSell.sort((a,b) => a.modifiedDuration - b.modifiedDuration)[0];
                 bondToBuy = buyUniverse.sort((a,b) => b.modifiedDuration - a.modifiedDuration)[0];
-            } else {
+            } else { // Need to DECREASE duration
                 bondToSell = eligibleToSell.sort((a,b) => b.modifiedDuration - a.modifiedDuration)[0];
                 bondToBuy = buyUniverse.sort((a,b) => a.modifiedDuration - b.modifiedDuration)[0];
             }
 
-            if (bondToSell && bondToBuy && bondToSell.marketValue > tradeAmount) {
-                const sellTrade = createTradeObject('SELL', bondToSell, tradeAmount);
-                const buyTrade = createTradeObject('BUY', bondToBuy, tradeAmount); // Cash neutral
-                
-                proposedTrades.push(sellTrade, buyTrade);
-                currentBonds = Array.from(applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData).bonds);
-                remainingTurnover -= (tradeAmount * 2);
-                continue; // Re-evaluate state in next loop
+            if (bondToSell && bondToBuy) {
+                const actualSellAmount = Math.min(idealTradeAmount, bondToSell.marketValue);
+
+                if (actualSellAmount > MIN_TRADE_SIZE) {
+                    const sellTrade = createTradeObject('SELL', bondToSell, actualSellAmount);
+                    const buyTrade = createTradeObject('BUY', bondToBuy, actualSellAmount); // Cash neutral
+                    
+                    proposedTrades.push(sellTrade, buyTrade);
+                    currentBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData);
+                    remainingTurnover -= (actualSellAmount * 2);
+                    tradeMadeInThisIteration = true;
+                    continue; // Re-evaluate state in next loop
+                }
             }
         }
 
         // ** SECONDARY OBJECTIVE: Minimize Tracking Error **
-        if (iterations === 1) rationaleParts.push("Primary Objective: Minimize KRD-based tracking error while respecting duration constraints.");
-        
         const krdGaps = KRD_TENORS.map(t => {
             const krdKey: KrdKey = `krd_${t}`;
             return { tenor: krdKey, gap: currentPortfolio[krdKey] - benchmark[krdKey] };
@@ -152,68 +158,83 @@ export const runOptimizer = (
         const largestGap = krdGaps[0];
 
         if (Math.abs(largestGap.gap) < 0.01) {
-            rationaleParts.push("KRDs are well-aligned. Halting further trades.");
+            rationaleParts.push("KRDs are well-aligned.");
             break; // No significant gaps to fix
         }
 
+        const idealKrdTradeAmount = Math.min(remainingTurnover / 2, initialPortfolio.totalMarketValue * 0.025);
         const isUnderweight = largestGap.gap < 0;
-        const tradeAmount = Math.min(remainingTurnover / 2, initialPortfolio.totalMarketValue * 0.025);
 
-        if (isUnderweight) {
-            // We need to BUY exposure to this tenor
-            const bondToBuy = buyUniverse.sort((a, b) => b[largestGap.tenor] - a[largestGap.tenor])[0];
-            if (params.mode === 'switch') {
-                const otherGaps = krdGaps.filter(g => g.gap > 0);
-                const largestOverweight = otherGaps.length > 0 ? otherGaps[0] : null;
-
+        if (params.mode === 'switch') {
+            if (isUnderweight) {
+                // Need to BUY exposure to this tenor. Sell an overweight.
+                const bondToBuy = buyUniverse.sort((a, b) => b[largestGap.tenor] - a[largestGap.tenor])[0];
+                const largestOverweight = krdGaps.find(g => g.gap > 0);
                 if (bondToBuy && largestOverweight) {
                     const bondToSell = eligibleToSell.sort((a, b) => b[largestOverweight.tenor] - a[largestOverweight.tenor])[0];
-                    if (bondToSell && bondToSell.marketValue > tradeAmount) {
-                         if (iterations < 3) rationaleParts.push(`- Reducing overweight in ${largestOverweight.tenor.replace('krd_', '')} to fund underweight in ${largestGap.tenor.replace('krd_', '')}.`);
-                        const sellTrade = createTradeObject('SELL', bondToSell, tradeAmount);
-                        const buyTrade = createTradeObject('BUY', bondToBuy, tradeAmount);
-                        proposedTrades.push(sellTrade, buyTrade);
-                        currentBonds = Array.from(applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData).bonds);
-                        remainingTurnover -= (tradeAmount * 2);
-                        continue;
+                    if (bondToSell) {
+                         const actualSellAmount = Math.min(idealKrdTradeAmount, bondToSell.marketValue);
+                         if(actualSellAmount > MIN_TRADE_SIZE) {
+                            if (iterations < 5) rationaleParts.push(`- Reducing overweight in ${largestOverweight.tenor.replace('krd_', '')} to fund underweight in ${largestGap.tenor.replace('krd_', '')}.`);
+                            const sellTrade = createTradeObject('SELL', bondToSell, actualSellAmount);
+                            const buyTrade = createTradeObject('BUY', bondToBuy, actualSellAmount);
+                            proposedTrades.push(sellTrade, buyTrade);
+                            currentBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData);
+                            remainingTurnover -= (actualSellAmount * 2);
+                            tradeMadeInThisIteration = true;
+                            continue;
+                         }
                     }
                 }
-            } else { // Buy-only mode
-                 if (bondToBuy) {
-                    if (iterations < 3) rationaleParts.push(`+ Increasing exposure to underweight ${largestGap.tenor.replace('krd_', '')}.`);
-                    const buyTrade = createTradeObject('BUY', bondToBuy, Math.min(remainingTurnover, tradeAmount*2));
-                    proposedTrades.push(buyTrade);
-                    currentBonds = Array.from(applyTradesToPortfolio(currentBonds, [buyTrade], bondMasterData).bonds);
-                    remainingTurnover -= buyTrade.marketValue;
-                    continue;
-                 }
-            }
-        } else { // Overweight, must sell
-             if (params.mode === 'switch') {
+            } else { // Overweight, must sell. Buy an underweight.
                  const bondToSell = eligibleToSell.sort((a, b) => b[largestGap.tenor] - a[largestGap.tenor])[0];
-                 const otherGaps = krdGaps.filter(g => g.gap < 0);
-                 const largestUnderweight = otherGaps.length > 0 ? otherGaps[0] : null;
-
-                 if (bondToSell && largestUnderweight && bondToSell.marketValue > tradeAmount) {
+                 const largestUnderweight = krdGaps.find(g => g.gap < 0);
+                 if (bondToSell && largestUnderweight) {
                      const bondToBuy = buyUniverse.sort((a, b) => b[largestUnderweight.tenor] - a[largestUnderweight.tenor])[0];
                      if (bondToBuy) {
-                        if (iterations < 3) rationaleParts.push(`- Reducing overweight in ${largestGap.tenor.replace('krd_', '')} to fund underweight in ${largestUnderweight.tenor.replace('krd_', '')}.`);
-                        const sellTrade = createTradeObject('SELL', bondToSell, tradeAmount);
-                        const buyTrade = createTradeObject('BUY', bondToBuy, tradeAmount);
-                        proposedTrades.push(sellTrade, buyTrade);
-                        currentBonds = Array.from(applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData).bonds);
-                        remainingTurnover -= (tradeAmount * 2);
-                        continue;
+                        const actualSellAmount = Math.min(idealKrdTradeAmount, bondToSell.marketValue);
+                         if(actualSellAmount > MIN_TRADE_SIZE) {
+                            if (iterations < 5) rationaleParts.push(`- Reducing overweight in ${largestGap.tenor.replace('krd_', '')} to fund underweight in ${largestUnderweight.tenor.replace('krd_', '')}.`);
+                            const sellTrade = createTradeObject('SELL', bondToSell, actualSellAmount);
+                            const buyTrade = createTradeObject('BUY', bondToBuy, actualSellAmount);
+                            proposedTrades.push(sellTrade, buyTrade);
+                            currentBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData);
+                            remainingTurnover -= (actualSellAmount * 2);
+                            tradeMadeInThisIteration = true;
+                            continue;
+                        }
                      }
+                 }
+            }
+        } else { // Buy-only mode
+             if (isUnderweight) {
+                 const bondToBuy = buyUniverse.sort((a, b) => b[largestGap.tenor] - a[largestGap.tenor])[0];
+                 if(bondToBuy) {
+                    const buyAmount = Math.min(remainingTurnover, idealKrdTradeAmount * 2);
+                    if (buyAmount > MIN_TRADE_SIZE) {
+                       if (iterations < 5) rationaleParts.push(`+ Increasing exposure to underweight ${largestGap.tenor.replace('krd_', '')}.`);
+                       const buyTrade = createTradeObject('BUY', bondToBuy, buyAmount);
+                       proposedTrades.push(buyTrade);
+                       currentBonds = applyTradesToPortfolio(currentBonds, [buyTrade], bondMasterData);
+                       remainingTurnover -= buyTrade.marketValue;
+                       tradeMadeInThisIteration = true;
+                       continue;
+                    }
                  }
              }
         }
-        // If no trades were made in this iteration, break to prevent infinite loops
-        break;
+
+        // If no trades were made in this entire iteration, break to prevent infinite loops.
+        if (!tradeMadeInThisIteration) {
+            if (iterations > 1) { // Only add if we've actually tried to optimize.
+                rationaleParts.push("No further beneficial trades found within constraints.");
+            }
+            break; 
+        }
     }
 
     if (proposedTrades.length === 0) {
-        return { ...emptyResult, rationale: rationaleParts.length > 0 ? rationaleParts.join(' ') : "Could not find any beneficial trades." };
+        return { ...emptyResult, rationale: "No trades recommended. Portfolio is optimal." };
     }
 
     const afterPortfolio = calculatePortfolioMetrics(currentBonds);
@@ -227,6 +248,6 @@ export const runOptimizer = (
         estimatedCost,
         estimatedCostBpsOfNav: initialPortfolio.totalMarketValue > 0 ? (estimatedCost / initialPortfolio.totalMarketValue) * 10000 : 0,
         estimatedCostBpsPerTradeSum: params.transactionCost * proposedTrades.length,
-        rationale: rationaleParts.join(' '),
+        rationale: Array.from(new Set(rationaleParts)).join(' '), // Remove duplicate rationale parts
     };
 };
