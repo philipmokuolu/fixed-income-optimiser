@@ -1,4 +1,4 @@
-import { PortfolioHolding, BondStaticData, BenchmarkAggregate, BenchmarkHolding, AppSettings } from "@/types";
+import { PortfolioHolding, BondStaticData, BenchmarkAggregate, BenchmarkHolding, AppSettings, HypotheticalTrade } from "@/types";
 
 // Import static data as fallbacks
 import { portfolioHoldings as staticHoldings } from "@/data/portfolioHoldings";
@@ -12,6 +12,7 @@ const LS_KEYS = {
     BENCHMARK_AGGREGATE: 'FIPO_BENCHMARK_AGGREGATE',
     BENCHMARK_HOLDINGS: 'FIPO_BENCHMARK_HOLDINGS',
     APP_SETTINGS: 'FIPO_APP_SETTINGS',
+    SANDBOX_TRADES: 'FIPO_SANDBOX_TRADES',
 };
 
 // --- SAVE FUNCTIONS ---
@@ -55,6 +56,14 @@ export const saveAppSettings = (settings: AppSettings): void => {
         console.error("Error saving app settings to localStorage", e);
     }
 };
+
+export const saveSandboxTrades = (trades: HypotheticalTrade[]): void => {
+    try {
+        localStorage.setItem(LS_KEYS.SANDBOX_TRADES, JSON.stringify(trades));
+    } catch (e) {
+        console.error("Error saving sandbox trades to localStorage", e);
+    }
+}
 
 // --- LOAD FUNCTIONS ---
 
@@ -111,4 +120,23 @@ export const loadAppSettings = (): AppSettings => {
     return {
         durationGapThreshold: 0.3,
     };
+};
+
+export const loadSandboxTrades = (): HypotheticalTrade[] => {
+    try {
+        const storedData = localStorage.getItem(LS_KEYS.SANDBOX_TRADES);
+        return storedData ? JSON.parse(storedData) : [];
+    } catch (e) {
+        console.error("Error loading sandbox trades from localStorage, using empty list.", e);
+        return [];
+    }
+};
+
+// --- CLEAR FUNCTIONS ---
+export const clearSandboxTrades = (): void => {
+    try {
+        localStorage.removeItem(LS_KEYS.SANDBOX_TRADES);
+    } catch (e) {
+        console.error("Error clearing sandbox trades from localStorage", e);
+    }
 };
