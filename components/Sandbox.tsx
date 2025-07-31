@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Portfolio, Benchmark, Bond, HypotheticalTrade, KrdTenor, KRD_TENORS, AppSettings, BondStaticData } from '@/types';
 import { Card } from '@/components/shared/Card';
 import { Dashboard } from '@/components/Dashboard';
@@ -28,6 +28,12 @@ const LoadingSpinner: React.FC = () => (
       <span className="text-slate-300 text-sm">Analysing...</span>
     </div>
   );
+  
+const RemoveIcon: React.FC = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+);
 
 const PnlDisplay:React.FC<{result: ScenarioResult}> = ({result}) => {
     const PnlRow: React.FC<{label: string, value: number, percent: number}> = ({label, value, percent}) => {
@@ -77,6 +83,15 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   
   const appSettings = useMemo(() => dataService.loadAppSettings(), []);
+  
+  useEffect(() => {
+      setHypotheticalTrades(dataService.loadSandboxTrades());
+  }, []);
+  
+  const updateTrades = (trades: HypotheticalTrade[]) => {
+      setHypotheticalTrades(trades);
+      dataService.saveSandboxTrades(trades);
+  };
 
   const simulatedPortfolio = useMemo(() => {
     if (hypotheticalTrades.length === 0) return portfolio;
@@ -130,14 +145,22 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
     return calculatePortfolioMetrics(bondsArray);
   }, [portfolio, hypotheticalTrades, bondMasterData]);
 
-  const addTrade = (trade: Omit<HypotheticalTrade, 'name'>) => {
+  const addTrade = (trade: Omit<HypotheticalTrade, 'name' | 'id'>) => {
     const bondData = portfolio.bonds.find(b => b.isin === trade.isin) || bondMasterData[trade.isin];
     if (bondData) {
-        setHypotheticalTrades(prev => [...prev, { ...trade, name: bondData.name }]);
+        const newTrade = { ...trade, name: bondData.name, id: Date.now() };
+        updateTrades([...hypotheticalTrades, newTrade]);
     }
   };
+  
+  const removeTrade = (id: number) => {
+      updateTrades(hypotheticalTrades.filter(t => t.id !== id));
+  };
 
-  const resetTrades = () => setHypotheticalTrades([]);
+  const resetTrades = () => {
+    updateTrades([]);
+    dataService.clearSandboxTrades();
+  };
 
   const handleRunAnalysis = useCallback(() => {
     setIsAnalyzing(true);
@@ -243,19 +266,30 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
                 </div>
                
                <div className="border-t border-slate-800 pt-4">
-                    <h4 className="text-md font-semibold text-slate-300 mb-2">Hypothetical Trades</h4>
+                    <div className="flex justify-between items-center mb-2">
+                        <h4 className="text-md font-semibold text-slate-300">Hypothetical Trades</h4>
+                         {hypotheticalTrades.length > 0 && 
+                            <button onClick={resetTrades} className="text-xs text-slate-400 hover:text-red-400 hover:underline">
+                                Clear All
+                            </button>
+                         }
+                    </div>
                     {hypotheticalTrades.length > 0 ? (
                         <div className="max-h-32 overflow-y-auto space-y-1 pr-2">
-                        {hypotheticalTrades.map((t, i) => (
-                            <div key={i} className="text-sm flex justify-between">
-                                <span className={`${t.action === 'BUY' ? 'text-green-400' : 'text-red-400'} font-semibold`}>{t.action}</span>
-                                <span className="truncate mx-2" title={t.name}>{t.name}</span>
-                                <span className="font-mono">{formatNumber(t.notional)}</span>
+                        {hypotheticalTrades.map((t) => (
+                            <div key={t.id} className="text-sm flex justify-between items-center bg-slate-800/50 p-1.5 rounded-md">
+                                <div className="flex-1 flex">
+                                    <span className={`w-10 font-semibold ${t.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{t.action}</span>
+                                    <span className="truncate mx-2" title={t.name}>{t.name}</span>
+                                </div>
+                                <span className="w-24 text-right font-mono mr-2">{formatNumber(t.notional)}</span>
+                                <button onClick={() => removeTrade(t.id)} className="text-slate-500 hover:text-red-400">
+                                    <RemoveIcon />
+                                </button>
                             </div>
                         ))}
                         </div>
                     ) : <p className="text-sm text-slate-500">No trades added.</p>}
-                    {hypotheticalTrades.length > 0 && <button onClick={resetTrades} className="mt-2 w-full bg-slate-600 text-white font-bold py-2 px-4 rounded-md hover:bg-slate-700 transition-colors text-sm">Reset Trades</button>}
                </div>
             </div>
           </Card>
