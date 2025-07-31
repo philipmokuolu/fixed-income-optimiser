@@ -116,6 +116,7 @@ export interface AppSettings {
 
 // Type for hypothetical trades in sandbox
 export interface HypotheticalTrade {
+    id: number; // Unique ID for stable rendering and deletion
     isin: string;
     name: string;
     action: 'BUY' | 'SELL';
