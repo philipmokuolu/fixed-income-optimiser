@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData, ProposedTrade } from '@/types';
+import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData, ProposedTrade, Bond } from '@/types';
 import { Card } from '@/components/shared/Card';
 import { runOptimizer } from '@/services/optimizerService';
 import { formatNumber, formatCurrency } from '@/utils/formatting';
+import { calculatePortfolioMetrics, calculateTrackingError } from '@/services/portfolioService';
 
 interface OptimiserProps {
   portfolio: Portfolio;
@@ -19,7 +20,11 @@ const LoadingSpinner: React.FC = () => (
   </div>
 );
 
-const ResultsDisplay: React.FC<{ result: OptimizationResult }> = ({ result }) => (
+const ResultsDisplay: React.FC<{ 
+  result: OptimizationResult,
+  activeTradeIndices: Set<number>,
+  onTradeToggle: (index: number) => void
+}> = ({ result, activeTradeIndices, onTradeToggle }) => (
   <Card className="mt-6">
     <h3 className="text-xl font-bold text-white mb-4">Optimisation Results</h3>
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6">
@@ -51,6 +56,7 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult }> = ({ result }) =>
             <table className="min-w-full text-sm">
                 <thead className="border-b border-slate-700">
                     <tr>
+                        <th className="py-2 px-1 text-center text-slate-400 font-semibold">Use</th>
                         <th className="py-2 text-left text-slate-400 font-semibold">Action</th>
                         <th className="py-2 text-left text-slate-400 font-semibold">ISIN</th>
                         <th className="py-2 text-left text-slate-400 font-semibold">Name</th>
@@ -63,7 +69,15 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult }> = ({ result }) =>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                     {result.proposedTrades.map((trade: ProposedTrade, index) => (
-                      <tr key={index}>
+                      <tr key={index} className={activeTradeIndices.has(index) ? '' : 'opacity-50'}>
+                          <td className="py-2.5 px-1 text-center">
+                              <input
+                                  type="checkbox"
+                                  checked={activeTradeIndices.has(index)}
+                                  onChange={() => onTradeToggle(index)}
+                                  className="h-4 w-4 rounded border-slate-600 bg-slate-700 text-orange-600 focus:ring-orange-500 cursor-pointer"
+                              />
+                          </td>
                           <td className={`py-2.5 font-bold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
                           <td className="py-2.5 font-mono text-orange-400">{trade.isin}</td>
                           <td className="py-2.5 text-slate-300 truncate max-w-xs">{trade.name}</td>
@@ -128,7 +142,9 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
   const [turnoverStr, setTurnoverStr] = useState(params.maxTurnover.toString());
   const [costStr, setCostStr] = useState(params.transactionCost.toString());
   
-  const [result, setResult] = useState<OptimizationResult | null>(null);
+  const [baseResult, setBaseResult] = useState<OptimizationResult | null>(null);
+  const [activeTradeIndices, setActiveTradeIndices] = useState<Set<number>>(new Set());
+  
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [eligibilitySearch, setEligibilitySearch] = useState('');
@@ -149,14 +165,15 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
   const runOptimiserCallback = useCallback(() => {
     setIsLoading(true);
     setError(null);
-    setResult(null);
+    setBaseResult(null);
     setTimeout(() => {
         try {
           const turnoverNum = Number(turnoverStr);
           const costNum = Number(costStr);
           const finalParams = { ...params, maxTurnover: turnoverNum, transactionCost: costNum };
           const res = runOptimizer(portfolio, benchmark, finalParams, bondMasterData);
-          setResult(res);
+          setBaseResult(res);
+          setActiveTradeIndices(new Set(res.proposedTrades.map((_, i) => i)));
         } catch (err: any) {
           setError(err.message || 'An unknown error occurred during calculation.');
         } finally {
@@ -172,6 +189,93 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
           b.isin.toLowerCase().includes(eligibilitySearch.toLowerCase())
       );
   }, [portfolio.bonds, eligibilitySearch]);
+  
+  const handleTradeToggle = (index: number) => {
+      setActiveTradeIndices(prev => {
+          const newSet = new Set(prev);
+          if (newSet.has(index)) {
+              newSet.delete(index);
+          } else {
+              newSet.add(index);
+          }
+          return newSet;
+      });
+  };
+  
+  const displayedResult = useMemo((): OptimizationResult | null => {
+      if (!baseResult) return null;
+      
+      const activeTrades = baseResult.proposedTrades.filter((_, index) => activeTradeIndices.has(index));
+      
+      if (activeTrades.length === 0) {
+          return {
+            ...baseResult,
+            impactAnalysis: {
+                ...baseResult.impactAnalysis,
+                after: baseResult.impactAnalysis.before,
+            },
+            estimatedCost: 0,
+            estimatedCostBpsOfNav: 0,
+            estimatedCostBpsPerTradeSum: 0,
+          };
+      }
+
+      // Recalculate "after" state
+      const newBondsMap = new Map<string, Bond>();
+      portfolio.bonds.forEach(bond => newBondsMap.set(bond.isin, { ...bond }));
+
+      activeTrades.forEach(trade => {
+         if(trade.action === 'SELL') {
+              const existing = newBondsMap.get(trade.isin)!;
+              const newMarketValue = existing.marketValue - trade.marketValue;
+              if (newMarketValue < 1000) {
+                  newBondsMap.delete(trade.isin);
+              } else {
+                  existing.marketValue = newMarketValue;
+                  existing.notional = newMarketValue / (existing.price / 100);
+              }
+         } else { // BUY
+              if (newBondsMap.has(trade.isin)) {
+                  const existing = newBondsMap.get(trade.isin)!;
+                  existing.marketValue += trade.marketValue;
+                  existing.notional = existing.marketValue / (existing.price / 100);
+              } else {
+                   const bondData = bondMasterData[trade.isin];
+                   newBondsMap.set(trade.isin, {
+                      ...bondData,
+                      isin: trade.isin,
+                      notional: trade.notional,
+                      marketValue: trade.marketValue,
+                      portfolioWeight: 0, 
+                      durationContribution: 0,
+                   });
+              }
+         }
+      });
+      
+      const afterPortfolio = calculatePortfolioMetrics(Array.from(newBondsMap.values()));
+      const afterMetrics = {
+        modifiedDuration: afterPortfolio.modifiedDuration,
+        durationGap: afterPortfolio.modifiedDuration - benchmark.modifiedDuration,
+        trackingError: calculateTrackingError(afterPortfolio, benchmark),
+        yield: afterPortfolio.averageYield,
+      };
+
+      const totalTradedValue = activeTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
+      const estimatedCost = totalTradedValue * (params.transactionCost / 10000);
+
+      return {
+          ...baseResult,
+          impactAnalysis: {
+            before: baseResult.impactAnalysis.before,
+            after: afterMetrics,
+          },
+          estimatedCost,
+          estimatedCostBpsOfNav: portfolio.totalMarketValue > 0 ? (estimatedCost / portfolio.totalMarketValue) * 10000 : 0,
+          estimatedCostBpsPerTradeSum: params.transactionCost * activeTrades.length,
+      }
+      
+  }, [baseResult, activeTradeIndices, portfolio, benchmark, bondMasterData, params.transactionCost]);
 
 
   return (
@@ -242,7 +346,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             </button>
           </Card>
           {error && <Card className="mt-6 border border-red-500/50"><p className="text-red-400 text-center">{error}</p></Card>}
-          {result && <ResultsDisplay result={result} />}
+          {displayedResult && <ResultsDisplay result={displayedResult} activeTradeIndices={activeTradeIndices} onTradeToggle={handleTradeToggle} />}
         </div>
       </div>
     </div>
