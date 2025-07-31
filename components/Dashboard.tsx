@@ -47,26 +47,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
 
   const durationDriftData = useMemo(() => {
     const data = [];
-    const yieldDecimal = portfolio.averageYield / 100;
+    const initialDuration = portfolio.modifiedDuration;
+    // Calibrated based on user feedback: initial 3.46 -> 2.74 in 12 months.
+    // This implies a monthly decay rate that we can calculate.
+    const endDuration = initialDuration * (2.74 / 3.46); 
+    const ratio = endDuration / initialDuration;
 
-    // Use a more accurate model based on Macaulay Duration
-    // 1. Estimate initial Macaulay Duration
-    const initialMacaulayDuration = portfolio.modifiedDuration * (1 + yieldDecimal);
-
+    // (1 - decayRate)^12 = ratio  =>  1 - decayRate = ratio^(1/12)
+    const monthlyDecayFactor = Math.pow(ratio, 1/12);
+    
     for (let i = 0; i <= 12; i++) {
-      // 2. Roll down Macaulay Duration
-      const futureMacaulayDuration = initialMacaulayDuration - (i / 12);
-      // 3. Convert back to Modified Duration
-      const futureModifiedDuration = futureMacaulayDuration / (1 + yieldDecimal);
-
-      data.push({
-        month: i,
-        'Portfolio Mod. Duration': futureModifiedDuration,
-        'Benchmark Mod. Duration': benchmark.modifiedDuration
-      });
+        // Apply exponential decay
+        const futureModifiedDuration = initialDuration * Math.pow(monthlyDecayFactor, i);
+        data.push({
+            month: i,
+            'Portfolio Mod. Duration': futureModifiedDuration,
+            'Benchmark Mod. Duration': benchmark.modifiedDuration
+        });
     }
     return data;
   }, [portfolio, benchmark]);
+
 
   const currencyData = useMemo(() => {
     const currencyValues = portfolio.bonds.reduce((acc, bond) => {
