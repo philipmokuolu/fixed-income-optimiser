@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import './App.css'
 import * as dataService from '@/services/dataService';
 import { buildPortfolio, calculatePortfolioMetrics, buildBenchmark } from '@/services/portfolioService';
 import { Dashboard } from '@/components/Dashboard';
