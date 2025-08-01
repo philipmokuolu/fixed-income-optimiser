@@ -249,3 +249,4 @@ export const runOptimizer = (
         rationale: Array.from(new Set(rationaleParts)).join(' '),
     };
 };
+getComputedStyle
