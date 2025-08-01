@@ -79,4 +79,3 @@ export const parseCsvToJson = <T>(
         reader.readAsText(file);
     });
 };
-getComputedStyle
