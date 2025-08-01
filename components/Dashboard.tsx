@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Portfolio, Benchmark, KrdKey } from '@/types';
+import { Portfolio, Benchmark, KrdKey, AppSettings } from '@/types';
 import { Card } from '@/components/shared/Card';
 import { KpiCard } from '@/components/shared/KpiCard';
 import { KRD_TENORS } from '@/constants';
@@ -10,7 +10,7 @@ import { formatNumber, formatCurrency, formatCurrencyM } from '@/utils/formattin
 interface DashboardProps {
   portfolio: Portfolio;
   benchmark: Benchmark;
-  durationGapThreshold: number;
+  settings: AppSettings;
 }
 
 const ChartTooltip = ({ active, payload, label }: any) => {
@@ -30,7 +30,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
 };
 
 
-export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, durationGapThreshold }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, settings }) => {
   const durationGap = useMemo(() => portfolio.modifiedDuration - benchmark.modifiedDuration, [portfolio, benchmark]);
   
   const trackingError = useMemo(() => calculateTrackingError(portfolio, benchmark), [portfolio, benchmark]);
@@ -94,7 +94,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
     })
   }, [portfolio, benchmark]);
 
-  const isDurationGapBreached = Math.abs(durationGap) > durationGapThreshold;
+  const { isDurationGapBreached, breachMessage } = useMemo(() => {
+    const { maxDurationShortfall, maxDurationSurplus } = settings;
+    const isBreached = durationGap < -maxDurationShortfall || durationGap > maxDurationSurplus;
+    let message = 'Within limits';
+    if (isBreached) {
+        message = durationGap < 0 ? `Breached (< -${maxDurationShortfall}y)` : `Breached (> +${maxDurationSurplus}y)`;
+    }
+    return { isDurationGapBreached: isBreached, breachMessage: message };
+  }, [durationGap, settings]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
@@ -111,7 +119,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, dura
           title="Duration Gap"
           value={`${formatNumber(durationGap, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} yrs`}
           changeColor={isDurationGapBreached ? 'text-red-400' : 'text-green-400'}
-          change={isDurationGapBreached ? `Breached (>${durationGapThreshold}y)` : `Within (±${durationGapThreshold}y)`}
+          change={breachMessage}
         />
         <KpiCard
           title="Projected Tracking Error"

@@ -96,17 +96,17 @@ const App: React.FC = () => {
 
     switch (activeView) {
       case 'dashboard':
-        return <Dashboard portfolio={portfolio} benchmark={benchmark} durationGapThreshold={appSettings.durationGapThreshold} />;
+        return <Dashboard portfolio={portfolio} benchmark={benchmark} settings={appSettings} />;
       case 'detail':
         return <PortfolioDetail portfolio={portfolio} />;
       case 'optimiser':
-        return <Optimiser portfolio={portfolio} benchmark={benchmark} bondMasterData={bondMasterData}/>;
+        return <Optimiser portfolio={portfolio} benchmark={benchmark} bondMasterData={bondMasterData} appSettings={appSettings}/>;
       case 'sandbox':
         return <Sandbox portfolio={portfolio} benchmark={benchmark} bondMasterData={bondMasterData} />;
       case 'datahub':
         return <DataHub onDataUploaded={loadAppData} />;
       default:
-        return <Dashboard portfolio={portfolio} benchmark={benchmark} durationGapThreshold={appSettings.durationGapThreshold} />;
+        return <Dashboard portfolio={portfolio} benchmark={benchmark} settings={appSettings} />;
     }
   };
 

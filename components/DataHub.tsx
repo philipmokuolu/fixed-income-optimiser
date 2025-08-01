@@ -67,9 +67,11 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
         }
     }, [benchmarkAggregate, onDataUploaded]);
 
-    const handleSettingsChange = (field: keyof AppSettings, value: number) => {
+    const handleSettingsChange = (field: keyof AppSettings, value: string) => {
         if (appSettings) {
-            setAppSettings({ ...appSettings, [field]: value });
+             // Ensure we only set positive numbers
+            const numValue = Math.abs(Number(value));
+            setAppSettings({ ...appSettings, [field]: isNaN(numValue) ? 0 : numValue });
         }
     }
     
@@ -144,15 +146,28 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
                      {appSettings && (
                          <div className="space-y-4">
                             <div>
-                                <label htmlFor="durationGapThreshold" className="block text-sm font-medium text-slate-300">Duration Gap Threshold (yrs)</label>
+                                <label htmlFor="maxDurationShortfall" className="block text-sm font-medium text-slate-300">Max. Duration Shortfall (yrs)</label>
                                 <input 
                                     type="number" 
-                                    id="durationGapThreshold" 
+                                    id="maxDurationShortfall" 
                                     step="0.05"
-                                    value={appSettings.durationGapThreshold} 
-                                    onChange={e => handleSettingsChange('durationGapThreshold', Number(e.target.value))} 
+                                    value={appSettings.maxDurationShortfall} 
+                                    onChange={e => handleSettingsChange('maxDurationShortfall', e.target.value)} 
                                     className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
                                 />
+                                <p className="text-xs text-slate-500 mt-1">Maximum allowed duration gap below benchmark (e.g., 0.1 for a gap of -0.1).</p>
+                            </div>
+                            <div>
+                                <label htmlFor="maxDurationSurplus" className="block text-sm font-medium text-slate-300">Max. Duration Surplus (yrs)</label>
+                                <input 
+                                    type="number" 
+                                    id="maxDurationSurplus" 
+                                    step="0.05"
+                                    value={appSettings.maxDurationSurplus} 
+                                    onChange={e => handleSettingsChange('maxDurationSurplus', e.target.value)} 
+                                    className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                                />
+                                 <p className="text-xs text-slate-500 mt-1">Maximum allowed duration gap above benchmark (e.g., 0.1 for a gap of +0.1).</p>
                             </div>
                             <button onClick={handleSaveSettings} className="w-full bg-orange-600 text-white font-bold py-2 px-4 rounded-md hover:bg-orange-700 transition-colors text-sm">
                                 Save Settings

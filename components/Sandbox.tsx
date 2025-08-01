@@ -331,7 +331,7 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
               </p>
           </div>
           <div className="mt-4 -translate-y-6">
-             <Dashboard portfolio={simulatedPortfolio} benchmark={benchmark} durationGapThreshold={appSettings.durationGapThreshold} />
+             <Dashboard portfolio={simulatedPortfolio} benchmark={benchmark} settings={appSettings} />
           </div>
         </div>
       </div>

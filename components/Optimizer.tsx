@@ -1,353 +1,213 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData, ProposedTrade, Bond } from '@/types';
+import React, { useMemo } from 'react';
+import { Portfolio, Benchmark, KrdKey, AppSettings } from '@/types';
 import { Card } from '@/components/shared/Card';
-import { runOptimizer } from '@/services/optimizerService';
-import { formatNumber, formatCurrency } from '@/utils/formatting';
-import { calculatePortfolioMetrics, calculateTrackingError } from '@/services/portfolioService';
+import { KpiCard } from '@/components/shared/KpiCard';
+import { KRD_TENORS } from '@/constants';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
+import { calculateTrackingError } from '@/services/portfolioService';
+import { formatNumber, formatCurrency, formatCurrencyM } from '@/utils/formatting';
 
-interface OptimiserProps {
+interface DashboardProps {
   portfolio: Portfolio;
   benchmark: Benchmark;
-  bondMasterData: Record<string, BondStaticData>;
+  settings: AppSettings;
 }
 
-const LoadingSpinner: React.FC = () => (
-  <div className="flex items-center justify-center space-x-2">
-    <div className="w-4 h-4 rounded-full animate-pulse bg-orange-400"></div>
-    <div className="w-4 h-4 rounded-full animate-pulse bg-orange-400" style={{ animationDelay: '0.2s' }}></div>
-    <div className="w-4 h-4 rounded-full animate-pulse bg-orange-400" style={{ animationDelay: '0.4s' }}></div>
-    <span className="text-slate-200">Calculating...</span>
-  </div>
-);
-
-const ResultsDisplay: React.FC<{ 
-  result: OptimizationResult,
-  activeTradeIndices: Set<number>,
-  onTradeToggle: (index: number) => void
-}> = ({ result, activeTradeIndices, onTradeToggle }) => (
-  <Card className="mt-6">
-    <h3 className="text-xl font-bold text-white mb-4">Optimisation Results</h3>
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6">
-      <div>
-        <h4 className="text-lg font-semibold text-slate-200 mb-3">Impact Analysis (Before → After)</h4>
-        <div className="space-y-3">
-          {Object.entries({
-            'Modified Duration': { b: result.impactAnalysis.before.modifiedDuration, a: result.impactAnalysis.after.modifiedDuration, u: 'yrs' },
-            'Duration Gap': { b: result.impactAnalysis.before.durationGap, a: result.impactAnalysis.after.durationGap, u: 'yrs' },
-            'Tracking Error': { b: result.impactAnalysis.before.trackingError, a: result.impactAnalysis.after.trackingError, u: 'bps' },
-            'Portfolio Yield': { b: result.impactAnalysis.before.yield, a: result.impactAnalysis.after.yield, u: '%' },
-          }).map(([key, {b, a, u}]) => (
-            <div key={key}>
-              <p className="text-sm text-slate-400">{key}</p>
-              <div className="flex items-center space-x-4">
-                <p className="text-lg font-mono text-slate-300 w-32 text-right">{formatNumber(b, {minimumFractionDigits: 2})} {u}</p>
-                <span className="text-orange-400 font-bold text-xl">→</span>
-                <p className="text-lg font-mono text-green-400 w-32 text-right">{formatNumber(a, {minimumFractionDigits: 2})} {u}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+const ChartTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-slate-800 p-2 border border-slate-700 rounded-md shadow-lg">
+        <p className="label text-slate-200">{`${label}`}</p>
+        {payload.map((pld: any, index: number) => (
+          <p key={index} style={{ color: pld.color }} className="text-sm">
+            {`${pld.name}: ${typeof pld.value === 'number' ? pld.value.toFixed(2) : pld.value }`}
+          </p>
+        ))}
       </div>
+    );
+  }
+  return null;
+};
 
-      <div className="lg:col-span-2">
-        <h4 className="text-lg font-semibold text-slate-200 mb-3">Proposed Trades</h4>
-        <div className="max-h-60 overflow-y-auto pr-2">
-          {result.proposedTrades.length > 0 ? (
-            <table className="min-w-full text-sm">
-                <thead className="border-b border-slate-700">
-                    <tr>
-                        <th className="py-2 px-1 text-center text-slate-400 font-semibold">Use</th>
-                        <th className="py-2 text-left text-slate-400 font-semibold">Action</th>
-                        <th className="py-2 text-left text-slate-400 font-semibold">ISIN</th>
-                        <th className="py-2 text-left text-slate-400 font-semibold">Name</th>
-                        <th className="py-2 text-right text-slate-400 font-semibold">M.Val</th>
-                        <th className="py-2 text-right text-slate-400 font-semibold">Notional</th>
-                        <th className="py-2 text-right text-slate-400 font-semibold">Price</th>
-                        <th className="py-2 text-right text-slate-400 font-semibold">Dur</th>
-                        <th className="py-2 text-right text-slate-400 font-semibold">YTM</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                    {result.proposedTrades.map((trade: ProposedTrade, index) => (
-                      <tr key={index} className={activeTradeIndices.has(index) ? '' : 'opacity-50'}>
-                          <td className="py-2.5 px-1 text-center">
-                              <input
-                                  type="checkbox"
-                                  checked={activeTradeIndices.has(index)}
-                                  onChange={() => onTradeToggle(index)}
-                                  className="h-4 w-4 rounded border-slate-600 bg-slate-700 text-orange-600 focus:ring-orange-500 cursor-pointer"
-                              />
-                          </td>
-                          <td className={`py-2.5 font-bold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
-                          <td className="py-2.5 font-mono text-orange-400">{trade.isin}</td>
-                          <td className="py-2.5 text-slate-300 truncate max-w-xs">{trade.name}</td>
-                          <td className="py-2.5 font-mono text-slate-200 text-right">{formatCurrency(trade.marketValue, 0, 0)}</td>
-                          <td className="py-2.5 font-mono text-slate-200 text-right">{formatNumber(trade.notional, {maximumFractionDigits: 0})}</td>
-                          <td className="py-2.5 font-mono text-slate-200 text-right">{formatNumber(trade.price, {minimumFractionDigits: 2})}</td>
-                          <td className="py-2.5 font-mono text-slate-200 text-right">{formatNumber(trade.modifiedDuration, {minimumFractionDigits: 2})}</td>
-                          <td className="py-2.5 font-mono text-slate-200 text-right">{formatNumber(trade.yieldToMaturity, {minimumFractionDigits: 2})}%</td>
-                      </tr>
-                    ))}
-                </tbody>
-            </table>
-          ) : <p className="py-2.5 text-slate-500">No trades recommended. Portfolio is optimal.</p>}
-        </div>
-      </div>
-      
-       {result.rationale && (
-          <div className="lg:col-span-2 border-t border-slate-800 pt-4">
-            <h4 className="text-lg font-semibold text-slate-200 mb-2">Rationale</h4>
-            <p className="text-sm text-slate-400 bg-slate-950 p-3 rounded-md">{result.rationale}</p>
-          </div>
-        )}
 
-      <div className="lg:col-span-2 border-t border-slate-800 pt-4">
-        <h4 className="text-lg font-semibold text-slate-200 mb-3">Cost-Benefit Summary</h4>
-         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-950 p-3 rounded-md">
-            <div className="text-center">
-                <p className="text-sm text-slate-400">Total Cost ($)</p>
-                <p className="text-xl font-mono text-orange-400">{formatCurrency(result.estimatedCost, 2, 2)}</p>
-            </div>
-            <div className="text-center">
-                <p className="text-sm text-slate-400">Cost (bps of NAV)</p>
-                <p className="text-xl font-mono text-orange-400">{formatNumber(result.estimatedCostBpsOfNav, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
-            </div>
-             <div className="text-center">
-                <p className="text-sm text-slate-400">Aggregate Trade Cost (bps)</p>
-                <p className="text-xl font-mono text-orange-400">{formatNumber(result.estimatedCostBpsPerTradeSum)}</p>
-            </div>
-            <div className="text-center md:col-span-3 border-t border-slate-700 pt-3 mt-2">
-                <p className="text-sm text-slate-400">Projected Tracking Error Reduction</p>
-                <p className="text-xl font-mono text-green-400">
-                    {formatNumber(result.impactAnalysis.before.trackingError - result.impactAnalysis.after.trackingError, {minimumFractionDigits: 2})} bps
-                </p>
-            </div>
-        </div>
-      </div>
-    </div>
-  </Card>
-);
-
-export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bondMasterData }) => {
-  const [params, setParams] = useState<OptimizationParams>({
-    durationGapThreshold: 0.3,
-    maxTurnover: 10,
-    minPositionSize: 1,
-    maxPositionSize: 20,
-    transactionCost: 5,
-    excludedBonds: [],
-    mode: 'switch',
-  });
+export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, settings }) => {
+  const durationGap = useMemo(() => portfolio.modifiedDuration - benchmark.modifiedDuration, [portfolio, benchmark]);
   
-  const [turnoverStr, setTurnoverStr] = useState(params.maxTurnover.toString());
-  const [costStr, setCostStr] = useState(params.transactionCost.toString());
-  
-  const [baseResult, setBaseResult] = useState<OptimizationResult | null>(null);
-  const [activeTradeIndices, setActiveTradeIndices] = useState<Set<number>>(new Set());
-  
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [eligibilitySearch, setEligibilitySearch] = useState('');
+  const trackingError = useMemo(() => calculateTrackingError(portfolio, benchmark), [portfolio, benchmark]);
 
-  const handleParamChange = (field: keyof OptimizationParams, value: any) => {
-    setParams(prev => ({ ...prev, [field]: value }));
-  };
-  
-  const handleCheckboxChange = (bondId: string) => {
-    setParams(prev => {
-        const excludedBonds = prev.excludedBonds.includes(bondId)
-            ? prev.excludedBonds.filter(id => id !== bondId)
-            : [...prev.excludedBonds, bondId];
-        return {...prev, excludedBonds};
-    });
-  };
-
-  const runOptimiserCallback = useCallback(() => {
-    setIsLoading(true);
-    setError(null);
-    setBaseResult(null);
-    setTimeout(() => {
-        try {
-          const turnoverNum = Number(turnoverStr);
-          const costNum = Number(costStr);
-          const finalParams = { ...params, maxTurnover: turnoverNum, transactionCost: costNum };
-          const res = runOptimizer(portfolio, benchmark, finalParams, bondMasterData);
-          setBaseResult(res);
-          setActiveTradeIndices(new Set(res.proposedTrades.map((_, i) => i)));
-        } catch (err: any) {
-          setError(err.message || 'An unknown error occurred during calculation.');
-        } finally {
-          setIsLoading(false);
-        }
-    }, 500);
-  }, [portfolio, benchmark, params, bondMasterData, turnoverStr, costStr]);
-  
-  const filteredBonds = useMemo(() => {
-      if (!eligibilitySearch) return portfolio.bonds;
-      return portfolio.bonds.filter(b => 
-          b.name.toLowerCase().includes(eligibilitySearch.toLowerCase()) ||
-          b.isin.toLowerCase().includes(eligibilitySearch.toLowerCase())
-      );
-  }, [portfolio.bonds, eligibilitySearch]);
-  
-  const handleTradeToggle = (index: number) => {
-      setActiveTradeIndices(prev => {
-          const newSet = new Set(prev);
-          if (newSet.has(index)) {
-              newSet.delete(index);
-          } else {
-              newSet.add(index);
-          }
-          return newSet;
-      });
-  };
-  
-  const displayedResult = useMemo((): OptimizationResult | null => {
-      if (!baseResult) return null;
-      
-      const activeTrades = baseResult.proposedTrades.filter((_, index) => activeTradeIndices.has(index));
-      
-      if (activeTrades.length === 0) {
-          return {
-            ...baseResult,
-            impactAnalysis: {
-                ...baseResult.impactAnalysis,
-                after: baseResult.impactAnalysis.before,
-            },
-            estimatedCost: 0,
-            estimatedCostBpsOfNav: 0,
-            estimatedCostBpsPerTradeSum: 0,
-          };
-      }
-
-      // Recalculate "after" state
-      const newBondsMap = new Map<string, Bond>();
-      portfolio.bonds.forEach(bond => newBondsMap.set(bond.isin, { ...bond }));
-
-      activeTrades.forEach(trade => {
-         if(trade.action === 'SELL') {
-              const existing = newBondsMap.get(trade.isin)!;
-              const newMarketValue = existing.marketValue - trade.marketValue;
-              if (newMarketValue < 1000) {
-                  newBondsMap.delete(trade.isin);
-              } else {
-                  existing.marketValue = newMarketValue;
-                  existing.notional = newMarketValue / (existing.price / 100);
-              }
-         } else { // BUY
-              if (newBondsMap.has(trade.isin)) {
-                  const existing = newBondsMap.get(trade.isin)!;
-                  existing.marketValue += trade.marketValue;
-                  existing.notional = existing.marketValue / (existing.price / 100);
-              } else {
-                   const bondData = bondMasterData[trade.isin];
-                   newBondsMap.set(trade.isin, {
-                      ...bondData,
-                      isin: trade.isin,
-                      notional: trade.notional,
-                      marketValue: trade.marketValue,
-                      portfolioWeight: 0, 
-                      durationContribution: 0,
-                   });
-              }
-         }
-      });
-      
-      const afterPortfolio = calculatePortfolioMetrics(Array.from(newBondsMap.values()));
-      const afterMetrics = {
-        modifiedDuration: afterPortfolio.modifiedDuration,
-        durationGap: afterPortfolio.modifiedDuration - benchmark.modifiedDuration,
-        trackingError: calculateTrackingError(afterPortfolio, benchmark),
-        yield: afterPortfolio.averageYield,
-      };
-
-      const totalTradedValue = activeTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
-      const estimatedCost = totalTradedValue * (params.transactionCost / 10000);
-
+  const krdGapData = useMemo(() => {
+    return KRD_TENORS.map(tenor => {
+      const krdKey: KrdKey = `krd_${tenor}`;
       return {
-          ...baseResult,
-          impactAnalysis: {
-            before: baseResult.impactAnalysis.before,
-            after: afterMetrics,
-          },
-          estimatedCost,
-          estimatedCostBpsOfNav: portfolio.totalMarketValue > 0 ? (estimatedCost / portfolio.totalMarketValue) * 10000 : 0,
-          estimatedCostBpsPerTradeSum: params.transactionCost * activeTrades.length,
+        tenor,
+        'Active KRD': portfolio[krdKey] - benchmark[krdKey]
       }
-      
-  }, [baseResult, activeTradeIndices, portfolio, benchmark, bondMasterData, params.transactionCost]);
+    });
+  }, [portfolio, benchmark]);
 
+  const durationDriftData = useMemo(() => {
+    const data = [];
+    const initialDuration = portfolio.modifiedDuration;
+    // Calibrated based on user feedback: initial 3.46 -> 2.74 in 12 months.
+    // This implies a monthly decay rate that we can calculate.
+    const endDuration = initialDuration * (2.74 / 3.46); 
+    const ratio = endDuration / initialDuration;
+
+    // (1 - decayRate)^12 = ratio  =>  1 - decayRate = ratio^(1/12)
+    const monthlyDecayFactor = Math.pow(ratio, 1/12);
+    
+    for (let i = 0; i <= 12; i++) {
+        // Apply exponential decay
+        const futureModifiedDuration = initialDuration * Math.pow(monthlyDecayFactor, i);
+        data.push({
+            month: i,
+            'Portfolio Mod. Duration': futureModifiedDuration,
+            'Benchmark Mod. Duration': benchmark.modifiedDuration
+        });
+    }
+    return data;
+  }, [portfolio, benchmark]);
+
+
+  const currencyData = useMemo(() => {
+    const currencyValues = portfolio.bonds.reduce((acc, bond) => {
+      if (!acc[bond.currency]) {
+        acc[bond.currency] = 0;
+      }
+      acc[bond.currency] += bond.marketValue;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return Object.entries(currencyValues).map(([name, value]) => ({ name, value }));
+  }, [portfolio]);
+
+  const COLORS = ['#f97316', '#6366f1', '#14b8a6'];
+
+  const krdComparisonData = useMemo(() => {
+    return KRD_TENORS.map(t => {
+      const krdKey = `krd_${t}` as KrdKey;
+      return {
+        tenor: t,
+        Portfolio: portfolio[krdKey],
+        Benchmark: benchmark[krdKey]
+      }
+    })
+  }, [portfolio, benchmark]);
+
+  const { isDurationGapBreached, breachMessage } = useMemo(() => {
+    const { maxDurationShortfall, maxDurationSurplus } = settings;
+    const isBreached = durationGap < -maxDurationShortfall || durationGap > maxDurationSurplus;
+    let message = 'Within limits';
+    if (isBreached) {
+        message = durationGap < 0 ? `Breached (< -${maxDurationShortfall}y)` : `Breached (> +${maxDurationSurplus}y)`;
+    }
+    return { isDurationGapBreached: isBreached, breachMessage: message };
+  }, [durationGap, settings]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      <h1 className="text-2xl font-bold text-white">The Optimiser</h1>
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-1 space-y-6">
-          <Card>
-            <h3 className="text-lg font-semibold text-slate-200 mb-4">Setup & Constraints</h3>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="maxTurnover" className="block text-sm font-medium text-slate-300">Max Turnover (%)</label>
-                <input type="number" id="maxTurnover" value={turnoverStr} onChange={e => setTurnoverStr(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
-              </div>
-              <div>
-                <label htmlFor="transactionCost" className="block text-sm font-medium text-slate-300">Transaction Cost per Trade (bps)</label>
-                <input type="number" id="transactionCost" value={costStr} onChange={e => setCostStr(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-slate-300">Optimisation Mode</span>
-                 <div className="mt-2 grid grid-cols-2 gap-2 rounded-md bg-slate-800 p-1">
-                    <button onClick={() => handleParamChange('mode', 'switch')} className={`px-3 py-1.5 text-sm font-semibold rounded ${params.mode === 'switch' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Switch Trades</button>
-                    <button onClick={() => handleParamChange('mode', 'buy-only')} className={`px-3 py-1.5 text-sm font-semibold rounded ${params.mode === 'buy-only' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Buy Only</button>
-                </div>
-                <p className="text-xs text-slate-500 mt-1">{params.mode === 'switch' ? 'Assumes cash-neutral trades (sell to buy).' : 'Assumes fund inflow (only buy trades).'}</p>
-              </div>
-            </div>
-          </Card>
-          <Card>
-            <h3 className="text-lg font-semibold text-slate-200 mb-2">Bond Eligibility</h3>
-            <p className="text-sm text-slate-500 mb-3">Untick bonds to exclude them from being sold in the optimisation.</p>
-            <input 
-                type="text" 
-                placeholder="Search by ISIN or name..."
-                value={eligibilitySearch}
-                onChange={e => setEligibilitySearch(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none mb-3"
-            />
-            <div className="max-h-80 overflow-y-auto space-y-1 pr-2 border-t border-slate-800 pt-2">
-              {filteredBonds.map(bond => (
-                  <div key={bond.isin} className="flex items-center p-1 rounded-md hover:bg-slate-800">
-                      <input
-                          id={`exclude-${bond.isin}`}
-                          type="checkbox"
-                          checked={!params.excludedBonds.includes(bond.isin)}
-                          onChange={() => handleCheckboxChange(bond.isin)}
-                          className="h-4 w-4 rounded border-slate-600 bg-slate-700 text-orange-600 focus:ring-orange-500 cursor-pointer"
-                      />
-                      <label htmlFor={`exclude-${bond.isin}`} className="ml-3 text-sm text-slate-300 truncate cursor-pointer" title={bond.name}>
-                          {bond.name}
-                      </label>
-                  </div>
-              ))}
-            </div>
-          </Card>
-        </div>
+      <h1 className="text-2xl font-bold text-white">Main Dashboard</h1>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <KpiCard
+          title="Portfolio Duration"
+          value={`${formatNumber(portfolio.modifiedDuration, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} yrs`}
+          change={`Benchmark: ${benchmark.modifiedDuration.toFixed(2)} yrs`}
+          changeColor="text-slate-400"
+        />
+        <KpiCard
+          title="Duration Gap"
+          value={`${formatNumber(durationGap, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} yrs`}
+          changeColor={isDurationGapBreached ? 'text-red-400' : 'text-green-400'}
+          change={breachMessage}
+        />
+        <KpiCard
+          title="Projected Tracking Error"
+          value={`${formatNumber(trackingError, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} bps`}
+        />
+        <KpiCard
+          title="Total Market Value"
+          value={formatCurrency(portfolio.totalMarketValue, 0, 0)}
+        />
+      </div>
 
-        <div className="xl:col-span-2">
-          <Card>
-            <h3 className="text-lg font-semibold text-slate-200 mb-4">Execution</h3>
-            <p className="text-sm text-slate-400 mb-4">Click "Run Optimiser" to generate a set of trades to minimise tracking error based on your constraints.</p>
-            <button
-              onClick={runOptimiserCallback}
-              disabled={isLoading}
-              className="w-full bg-orange-600 text-white font-bold py-3 px-4 rounded-md hover:bg-orange-700 disabled:bg-slate-700 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
-            >
-              {isLoading ? <LoadingSpinner /> : 'Run Optimiser'}
-            </button>
-          </Card>
-          {error && <Card className="mt-6 border border-red-500/50"><p className="text-red-400 text-center">{error}</p></Card>}
-          {displayedResult && <ResultsDisplay result={displayedResult} activeTradeIndices={activeTradeIndices} onTradeToggle={handleTradeToggle} />}
-        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <h3 className="text-lg font-semibold text-slate-200 mb-4">Duration Drift Forecaster (12 Months)</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={durationDriftData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <XAxis dataKey="month" tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }} />
+              <YAxis 
+                tick={{ fill: '#94a3b8' }} 
+                tickLine={{ stroke: '#94a3b8' }} 
+                domain={['dataMin', 'dataMax']} 
+                tickFormatter={(tick) => formatNumber(tick, { minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              />
+              <Tooltip content={<ChartTooltip />} />
+              <Legend wrapperStyle={{ color: '#94a3b8' }} />
+              <Line type="monotone" dataKey="Portfolio Mod. Duration" stroke="#f97316" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="Benchmark Mod. Duration" stroke="#f43f5e" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card>
+          <h3 className="text-lg font-semibold text-slate-200 mb-4">Key Rate Duration (KRD) Gap Summary</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={krdGapData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <XAxis dataKey="tenor" tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }}/>
+              <YAxis tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }}/>
+              <Tooltip content={<ChartTooltip />} cursor={{fill: '#334155'}}/>
+              <Bar dataKey="Active KRD" fill="#f97316" />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card className="lg:col-span-2">
+           <h3 className="text-lg font-semibold text-slate-200 mb-4">Portfolio Analysis</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h4 className="text-md font-semibold text-slate-300 mb-4 text-center">Currency Exposure</h4>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={currencyData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          outerRadius={100}
+                          fill="#8884d8"
+                          dataKey="value"
+                          nameKey="name"
+                          label={({ name, percent }) => `${name} ${formatNumber(percent * 100, {maximumFractionDigits: 0})}%`}
+                        >
+                          {currencyData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: number) => formatCurrency(value, 0, 0)} />
+                        <Legend wrapperStyle={{ color: '#94a3b8' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                </div>
+                 <div>
+                    <h4 className="text-md font-semibold text-slate-300 mb-4 text-center">Portfolio vs Benchmark KRDs</h4>
+                     <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={krdComparisonData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                          <XAxis dataKey="tenor" tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }}/>
+                          <YAxis tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }}/>
+                          <Tooltip content={<ChartTooltip />} cursor={{fill: '#334155'}}/>
+                          <Legend wrapperStyle={{ color: '#94a3b8' }} />
+                          <Bar dataKey="Portfolio" fill="#f97316" />
+                          <Bar dataKey="Benchmark" fill="#f43f5e" />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            </div>
+        </Card>
       </div>
     </div>
   );

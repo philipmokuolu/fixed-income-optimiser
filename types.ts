@@ -70,7 +70,8 @@ export interface BenchmarkAggregate {
 export interface Benchmark extends BenchmarkAggregate, KRDFields {}
 
 export interface OptimizationParams {
-  durationGapThreshold: number;
+  maxDurationShortfall: number;
+  maxDurationSurplus: number;
   maxTurnover: number;
   minPositionSize: number;
   maxPositionSize: number;
@@ -111,7 +112,8 @@ export interface OptimizationResult {
 
 // New type for application-wide user settings
 export interface AppSettings {
-    durationGapThreshold: number;
+    maxDurationShortfall: number;
+    maxDurationSurplus: number;
 }
 
 // Type for hypothetical trades in sandbox

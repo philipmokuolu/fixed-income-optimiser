@@ -111,14 +111,23 @@ export const loadAppSettings = (): AppSettings => {
     try {
         const storedData = localStorage.getItem(LS_KEYS.APP_SETTINGS);
         if (storedData) {
-            return JSON.parse(storedData);
+            const settings = JSON.parse(storedData);
+            // Handle migration from old setting to new asymmetrical settings
+            if (settings.durationGapThreshold !== undefined) {
+                return {
+                    maxDurationShortfall: Math.abs(settings.durationGapThreshold),
+                    maxDurationSurplus: Math.abs(settings.durationGapThreshold),
+                }
+            }
+            return settings;
         }
     } catch (e) {
         console.error("Error loading app settings from localStorage, using defaults.", e);
     }
     // Default settings if nothing is stored
     return {
-        durationGapThreshold: 0.3,
+        maxDurationShortfall: 0.1,
+        maxDurationSurplus: 0.1,
     };
 };
 
