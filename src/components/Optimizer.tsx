@@ -17,7 +17,7 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (pai
         const isImproved = (label.includes('Error') && after < before) || (!label.includes('Error') && after > before);
         const color = after === before ? 'text-slate-300' : isImproved ? 'text-green-400' : 'text-red-400';
         return (
-             <div className="flex justify-between items-center text-sm py-1.5">
+             <div className="flex justify-between items-center text-base py-2">
                 <span className="text-slate-400">{label}</span>
                 <div className="flex items-center space-x-2 font-mono">
                     <span className="text-slate-300">{formatNumber(before, formatOpts)}{unit}</span>
@@ -60,7 +60,7 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (pai
                              </thead>
                              <tbody className="divide-y divide-slate-800">
                                 {result.proposedTrades.map(trade => (
-                                    <tr key={trade.isin + trade.action} className="hover:bg-slate-800/50">
+                                    <tr key={trade.isin + trade.action + trade.pairId} className="hover:bg-slate-800/50">
                                         <td className="px-2 py-2"><input type="checkbox" checked={activeTrades.has(trade.pairId)} onChange={() => onTradeToggle(trade.pairId)} className="form-checkbox h-4 w-4 bg-slate-700 border-slate-600 text-orange-500 rounded focus:ring-orange-500" /></td>
                                         <td className={`px-2 py-2 text-sm font-semibold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
                                         <td className="px-2 py-2 text-sm font-mono text-orange-400">{trade.isin}</td>
@@ -81,7 +81,7 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (pai
             {result.rationale && (
                  <div>
                     <h3 className="text-lg font-semibold text-slate-200 mb-2">Rationale</h3>
-                    <p className="text-sm text-slate-400 bg-slate-800/50 p-3 rounded-md">{result.rationale}</p>
+                    <p className="text-base text-slate-400 bg-slate-800/50 p-4 rounded-md">{result.rationale}</p>
                  </div>
             )}
 
@@ -231,15 +231,15 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                     </button>
                                     <button 
                                         onClick={() => setMode('buy-only')} 
-                                        className="px-4 py-2 text-sm font-semibold rounded-md transition-colors text-slate-500 bg-slate-800/50 cursor-not-allowed"
-                                        disabled={true}
-                                        title="This feature is temporarily disabled while it's being rebuilt for stability."
+                                        className={`px-4 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'buy-only' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
                                     >
                                         Buy Only
                                     </button>
                                 </div>
                                 <p className="text-xs text-slate-500 mt-1">
-                                    Switch Trades: Iteratively trades to first fix the duration gap, then to minimise tracking error, all while respecting your turnover constraints.
+                                     {mode === 'switch'
+                                        ? "Switch Trades: Cash-neutral trades to first fix the duration gap, then minimise tracking error."
+                                        : "Buy Only: Uses 'Max Turnover %' as new cash to invest, first fixing duration, then tracking error."}
                                 </p>
                             </div>
                         </div>
