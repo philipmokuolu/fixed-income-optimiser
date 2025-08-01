@@ -9,6 +9,7 @@ import { Sandbox } from '@/components/Sandbox';
 import { DataHub } from '@/components/DataHub';
 import { Login } from '@/components/Login';
 import { Portfolio, Benchmark, BondStaticData, AppSettings } from '@/types';
+import { NevastarLogo } from '@/components/shared/NevastarLogo';
 
 type View = 'dashboard' | 'detail' | 'optimiser' | 'sandbox' | 'datahub';
 
@@ -116,11 +117,13 @@ const App: React.FC = () => {
       {/* Sidebar Navigation */}
       <nav className="w-20 lg:w-64 bg-slate-900 p-2 lg:p-4 flex flex-col justify-between shadow-2xl">
         <div>
-          <div className="flex items-center space-x-2 p-2 lg:mb-4">
-             <div className="w-10 h-10 bg-orange-600 rounded-lg flex items-center justify-center">
-                 <NavIcon path="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+          <div className="flex items-center space-x-3 p-2 lg:mb-4">
+             <div className="w-12 h-12 bg-orange-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                 <NevastarLogo className="w-9 h-9 text-white" />
              </div>
-             <h1 className="text-xl font-bold text-white hidden lg:block">Fixed Income Portfolio Optimiser</h1>
+             <h1 className="text-xl font-bold text-white hidden lg:block leading-tight">
+                Fixed Income<br />Portfolio Optimiser
+             </h1>
           </div>
           <ul className="space-y-2">
             {NAV_ITEMS.map(item => (
