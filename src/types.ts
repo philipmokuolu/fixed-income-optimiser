@@ -91,7 +91,7 @@ export interface ProposedTrade {
   yieldToMaturity: number;
 }
 
-interface ImpactMetrics {
+export interface ImpactMetrics {
     modifiedDuration: number;
     durationGap: number;
     trackingError: number;

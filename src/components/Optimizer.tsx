@@ -75,7 +75,7 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (isi
                              </tbody>
                         </table>
                      </div>
-                ) : <p className="text-sm text-slate-400">No trades recommended. Portfolio is optimal.</p>}
+                ) : <p className="text-sm text-slate-400">{result.rationale || 'No trades recommended.'}</p>}
             </div>
 
             {result.rationale && (
@@ -171,12 +171,15 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         const activeProposedTrades = result.proposedTrades.filter(t => activeTrades.has(t.isin));
         
         if (activeProposedTrades.length === 0) {
+            const beforeMetrics = optimizerService.calculateImpactMetrics(portfolio, benchmark);
             return {
                 ...result,
-                impactAnalysis: { before: result.impactAnalysis.before, after: result.impactAnalysis.before },
+                proposedTrades: [],
+                impactAnalysis: { before: beforeMetrics, after: beforeMetrics },
                 estimatedCost: 0,
                 estimatedCostBpsOfNav: 0,
                 estimatedCostBpsPerTradeSum: 0,
+                rationale: "No trades selected for execution."
             }
         }
         
@@ -189,7 +192,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         
         return {
             ...result,
-            impactAnalysis: { before: result.impactAnalysis.before, after: afterMetrics },
+            impactAnalysis: { before: optimizerService.calculateImpactMetrics(portfolio, benchmark), after: afterMetrics },
             estimatedCost,
             estimatedCostBpsOfNav: portfolio.totalMarketValue > 0 ? (estimatedCost / portfolio.totalMarketValue) * 10000 : 0,
             estimatedCostBpsPerTradeSum: Number(transactionCost) * activeProposedTrades.length,
@@ -222,10 +225,24 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                             <div>
                                 <label className="block text-sm font-medium text-slate-300">Optimisation Mode</label>
                                 <div className="mt-1 grid grid-cols-2 gap-2 p-1 bg-slate-800 rounded-lg">
-                                    <button onClick={() => setMode('switch')} className={`px-4 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'switch' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Switch Trades</button>
-                                    <button onClick={() => setMode('buy-only')} className={`px-4 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'buy-only' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Buy Only</button>
+                                    <button 
+                                        onClick={() => setMode('switch')} 
+                                        className={`px-4 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'switch' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
+                                    >
+                                        Switch Trades
+                                    </button>
+                                    <button 
+                                        onClick={() => setMode('buy-only')} 
+                                        className="px-4 py-2 text-sm font-semibold rounded-md transition-colors text-slate-500 bg-slate-800/50 cursor-not-allowed"
+                                        disabled={true}
+                                        title="This feature is temporarily disabled while it's being rebuilt for stability."
+                                    >
+                                        Buy Only
+                                    </button>
                                 </div>
-                                <p className="text-xs text-slate-500 mt-1">{mode === 'switch' ? 'Assumes cash-neutral trades (sell to buy).' : 'Assumes new fund inflows, only BUY trades will be recommended.'}</p>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    Rebuilding the optimiser. Currently, only 'Switch Trades' mode is active to fix the portfolio's duration gap.
+                                </p>
                             </div>
                         </div>
                     </Card>
@@ -265,6 +282,11 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                     {displayedResult && (
                         <Card className="mt-6">
                            <ResultsDisplay result={displayedResult} onTradeToggle={handleTradeToggle} activeTrades={activeTrades}/>
+                        </Card>
+                    )}
+                     {result && !displayedResult && (
+                        <Card className="mt-6">
+                           <ResultsDisplay result={result} onTradeToggle={handleTradeToggle} activeTrades={activeTrades}/>
                         </Card>
                     )}
                 </div>
