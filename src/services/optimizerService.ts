@@ -38,34 +38,38 @@ const applyTradesToPortfolio = (
 
     tradesToApply.forEach(trade => {
        if(trade.action === 'SELL') {
-            const existing = newBondsMap.get(trade.isin)!;
-            const newMarketValue = existing.marketValue - trade.marketValue;
-            if (newMarketValue < MIN_TRADE_SIZE) {
-                newBondsMap.delete(trade.isin);
-            } else {
-                existing.marketValue = newMarketValue;
-                existing.notional = newMarketValue / (existing.price / 100);
+            const existing = newBondsMap.get(trade.isin);
+            if (existing) {
+                const newMarketValue = existing.marketValue - trade.marketValue;
+                if (newMarketValue < MIN_TRADE_SIZE) {
+                    newBondsMap.delete(trade.isin);
+                } else {
+                    existing.marketValue = newMarketValue;
+                    existing.notional = newMarketValue / (existing.price / 100);
+                }
             }
        } else { // BUY
-            if (newBondsMap.has(trade.isin)) {
-                const existing = newBondsMap.get(trade.isin)!;
+            const existing = newBondsMap.get(trade.isin);
+            if (existing) {
                 existing.marketValue += trade.marketValue;
                 existing.notional = existing.marketValue / (existing.price / 100);
             } else {
                  const bondData = bondMasterData[trade.isin];
-                 newBondsMap.set(trade.isin, {
-                    ...bondData,
-                    isin: trade.isin,
-                    notional: trade.notional,
-                    marketValue: trade.marketValue,
-                    portfolioWeight: 0, 
-                    durationContribution: 0,
-                 });
+                 if (bondData) {
+                     newBondsMap.set(trade.isin, {
+                        ...bondData,
+                        isin: trade.isin,
+                        notional: trade.notional,
+                        marketValue: trade.marketValue,
+                        portfolioWeight: 0, 
+                        durationContribution: 0,
+                     });
+                 }
             }
        }
     });
     
-    return calculatePortfolioMetrics(Array.from(newBondsMap.values())).bonds;
+    return Array.from(newBondsMap.values());
 }
 
 
@@ -129,11 +133,15 @@ export const runOptimizer = (
             let bondToBuy: (BondStaticData & Bond) | undefined;
 
             if (isPortfolioShort) { // Need to INCREASE duration
-                bondToSell = eligibleToSell.sort((a,b) => a.modifiedDuration - b.modifiedDuration)[0];
-                bondToBuy = buyUniverse.sort((a,b) => b.modifiedDuration - a.modifiedDuration)[0];
+                if (eligibleToSell.length > 0 && buyUniverse.length > 0) {
+                    bondToSell = eligibleToSell.sort((a,b) => a.modifiedDuration - b.modifiedDuration)[0];
+                    bondToBuy = buyUniverse.sort((a,b) => b.modifiedDuration - a.modifiedDuration)[0];
+                }
             } else { // Need to DECREASE duration
-                bondToSell = eligibleToSell.sort((a,b) => b.modifiedDuration - a.modifiedDuration)[0];
-                bondToBuy = buyUniverse.sort((a,b) => a.modifiedDuration - b.modifiedDuration)[0];
+                if (eligibleToSell.length > 0 && buyUniverse.length > 0) {
+                    bondToSell = eligibleToSell.sort((a,b) => b.modifiedDuration - a.modifiedDuration)[0];
+                    bondToBuy = buyUniverse.sort((a,b) => a.modifiedDuration - b.modifiedDuration)[0];
+                }
             }
 
             if (bondToSell && bondToBuy) {
@@ -158,13 +166,13 @@ export const runOptimizer = (
             return { tenor: krdKey, gap: currentPortfolio[krdKey] - benchmark[krdKey] };
         }).sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
         
+        if (!krdGaps[0] || Math.abs(krdGaps[0].gap) < 0.01) {
+            break; // Gracefully exit if there are no gaps or the largest gap is insignificant.
+        }
+
         const largestGap = krdGaps[0];
         const idealKrdTradeAmount = Math.min(remainingTurnover / 2, initialPortfolio.totalMarketValue * 0.025);
         
-        if (Math.abs(largestGap.gap) < 0.01) {
-            break; // No significant gaps to fix
-        }
-
         const isUnderweight = largestGap.gap < 0;
 
         if (params.mode === 'switch') {
@@ -172,15 +180,19 @@ export const runOptimizer = (
             let bondToBuy: (BondStaticData & Bond) | undefined;
             
             if (isUnderweight) { // Need to BUY exposure to this tenor. Sell an overweight.
-                bondToBuy = buyUniverse.sort((a, b) => b[largestGap.tenor] - a[largestGap.tenor])[0];
+                if (buyUniverse.length > 0) {
+                    bondToBuy = buyUniverse.sort((a, b) => b[largestGap.tenor] - a[largestGap.tenor])[0];
+                }
                 const largestOverweight = krdGaps.find(g => g.gap > 0.01);
-                if (largestOverweight) {
+                if (largestOverweight && eligibleToSell.length > 0) {
                     bondToSell = eligibleToSell.sort((a, b) => b[largestOverweight.tenor] - a[largestOverweight.tenor])[0];
                 }
             } else { // Overweight, must sell. Buy an underweight.
-                 bondToSell = eligibleToSell.sort((a, b) => b[largestGap.tenor] - a[largestGap.tenor])[0];
+                 if (eligibleToSell.length > 0) {
+                    bondToSell = eligibleToSell.sort((a, b) => b[largestGap.tenor] - a[largestGap.tenor])[0];
+                 }
                  const largestUnderweight = krdGaps.find(g => g.gap < -0.01);
-                 if (largestUnderweight) {
+                 if (largestUnderweight && buyUniverse.length > 0) {
                      bondToBuy = buyUniverse.sort((a, b) => b[largestUnderweight.tenor] - a[largestUnderweight.tenor])[0];
                  }
             }
@@ -211,8 +223,8 @@ export const runOptimizer = (
 
         } else { // Buy-only mode
              if (isUnderweight) {
-                 const bondToBuy = buyUniverse.sort((a, b) => b[largestGap.tenor] - a[largestGap.tenor])[0];
-                 if(bondToBuy) {
+                 if(buyUniverse.length > 0) {
+                    const bondToBuy = buyUniverse.sort((a, b) => b[largestGap.tenor] - a[largestGap.tenor])[0];
                     const buyAmount = Math.min(remainingTurnover, idealKrdTradeAmount * 2);
                     if (buyAmount > MIN_TRADE_SIZE) {
                        const buyTrade = createTradeObject('BUY', bondToBuy, buyAmount);
