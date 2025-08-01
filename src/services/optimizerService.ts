@@ -196,7 +196,7 @@ export const runOptimizer = (
                     const tempPortfolio = calculatePortfolioMetrics(tempBonds);
                     const tempDurationGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
 
-                    if (tempDurationGap < -params.maxDurationShortfall && tempDurationGap > params.maxDurationSurplus) {
+                    if (tempDurationGap < -params.maxDurationShortfall || tempDurationGap > params.maxDurationSurplus) {
                         // This trade would breach the duration gap. Do nothing and let the loop find another combination.
                     } else {
                         // Trade is safe, proceed.
