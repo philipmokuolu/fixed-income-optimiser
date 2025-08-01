@@ -12,7 +12,7 @@ interface OptimiserProps {
   appSettings: AppSettings;
 }
 
-const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (isin: string) => void, activeTrades: Set<string> }> = ({ result, onTradeToggle, activeTrades }) => {
+const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (pairId: number) => void, activeTrades: Set<number> }> = ({ result, onTradeToggle, activeTrades }) => {
     const ImpactRow: React.FC<{label: string, before: number, after: number, unit: string, formatOpts?: Intl.NumberFormatOptions}> = ({label, before, after, unit, formatOpts={minimumFractionDigits: 2, maximumFractionDigits: 2}}) => {
         const isImproved = (label.includes('Error') && after < before) || (!label.includes('Error') && after > before);
         const color = after === before ? 'text-slate-300' : isImproved ? 'text-green-400' : 'text-red-400';
@@ -61,7 +61,7 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (isi
                              <tbody className="divide-y divide-slate-800">
                                 {result.proposedTrades.map(trade => (
                                     <tr key={trade.isin + trade.action} className="hover:bg-slate-800/50">
-                                        <td className="px-2 py-2"><input type="checkbox" checked={activeTrades.has(trade.isin)} onChange={() => onTradeToggle(trade.isin)} className="form-checkbox h-4 w-4 bg-slate-700 border-slate-600 text-orange-500 rounded focus:ring-orange-500" /></td>
+                                        <td className="px-2 py-2"><input type="checkbox" checked={activeTrades.has(trade.pairId)} onChange={() => onTradeToggle(trade.pairId)} className="form-checkbox h-4 w-4 bg-slate-700 border-slate-600 text-orange-500 rounded focus:ring-orange-500" /></td>
                                         <td className={`px-2 py-2 text-sm font-semibold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
                                         <td className="px-2 py-2 text-sm font-mono text-orange-400">{trade.isin}</td>
                                         <td className="px-2 py-2 text-sm max-w-xs truncate">{trade.name}</td>
@@ -117,8 +117,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     const [result, setResult] = useState<OptimizationResult | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     
-    // For "what-if" analysis
-    const [activeTrades, setActiveTrades] = useState<Set<string>>(new Set());
+    // For "what-if" analysis, now stores trade pair IDs
+    const [activeTrades, setActiveTrades] = useState<Set<number>>(new Set());
     
     useEffect(() => {
         sessionStorage.setItem('optimiser_maxTurnover', maxTurnover);
@@ -145,30 +145,27 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             };
             const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData);
             setResult(optoResult);
-            setActiveTrades(new Set(optoResult.proposedTrades.map(t => t.isin)));
+            setActiveTrades(new Set(optoResult.proposedTrades.map(t => t.pairId)));
             setIsLoading(false);
         }, 500); // simulate async work
     }, [maxTurnover, transactionCost, excludedBonds, mode, portfolio, benchmark, bondMasterData, appSettings]);
     
-    const handleTradeToggle = (isin: string) => {
+    const handleTradeToggle = (pairId: number) => {
         setActiveTrades(prev => {
             const newSet = new Set(prev);
-            // In a switch, both buy and sell use same ISINs, so toggle all with same ISIN
-            const hasIsin = Array.from(newSet).some(t_isin => t_isin === isin);
-            if (hasIsin) {
-                 const filtered = Array.from(newSet).filter(t_isin => t_isin !== isin);
-                 return new Set(filtered);
+            if (newSet.has(pairId)) {
+                newSet.delete(pairId);
             } else {
-                result?.proposedTrades.filter(t => t.isin === isin).forEach(t => newSet.add(t.isin));
-                return newSet;
+                newSet.add(pairId);
             }
+            return newSet;
         })
     }
     
     const displayedResult = useMemo(() => {
         if (!result) return null;
         
-        const activeProposedTrades = result.proposedTrades.filter(t => activeTrades.has(t.isin));
+        const activeProposedTrades = result.proposedTrades.filter(t => activeTrades.has(t.pairId));
         
         if (activeProposedTrades.length === 0) {
             const beforeMetrics = optimizerService.calculateImpactMetrics(portfolio, benchmark);
@@ -192,6 +189,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         
         return {
             ...result,
+            proposedTrades: activeProposedTrades, // Show only active trades in the table
             impactAnalysis: { before: optimizerService.calculateImpactMetrics(portfolio, benchmark), after: afterMetrics },
             estimatedCost,
             estimatedCostBpsOfNav: portfolio.totalMarketValue > 0 ? (estimatedCost / portfolio.totalMarketValue) * 10000 : 0,
@@ -241,7 +239,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                     </button>
                                 </div>
                                 <p className="text-xs text-slate-500 mt-1">
-                                    Rebuilding the optimiser. Currently, only 'Switch Trades' mode is active to fix the portfolio's duration gap.
+                                    Switch Trades: Iteratively trades to first fix the duration gap, then to minimise tracking error, all while respecting your turnover constraints.
                                 </p>
                             </div>
                         </div>
@@ -284,7 +282,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                            <ResultsDisplay result={displayedResult} onTradeToggle={handleTradeToggle} activeTrades={activeTrades}/>
                         </Card>
                     )}
-                     {result && !displayedResult && (
+                     {result && !displayedResult && ( // This handles the case where all trades are toggled off
                         <Card className="mt-6">
                            <ResultsDisplay result={result} onTradeToggle={handleTradeToggle} activeTrades={activeTrades}/>
                         </Card>
