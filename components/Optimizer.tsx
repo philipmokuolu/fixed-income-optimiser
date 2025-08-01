@@ -30,7 +30,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
 };
 
 
-export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, settings }) => {
+export const Optimiser: React.FC<DashboardProps> = ({ portfolio, benchmark, settings }) => {
   const durationGap = useMemo(() => portfolio.modifiedDuration - benchmark.modifiedDuration, [portfolio, benchmark]);
   
   const trackingError = useMemo(() => calculateTrackingError(portfolio, benchmark), [portfolio, benchmark]);
