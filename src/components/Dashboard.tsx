@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { motion } from 'framer-motion';
 import { Portfolio, Benchmark, KrdKey, AppSettings } from '@/types';
 import { Card } from '@/components/shared/Card';
 import { KpiCard } from '@/components/shared/KpiCard';
@@ -27,6 +28,28 @@ const ChartTooltip = ({ active, payload, label }: any) => {
     );
   }
   return null;
+};
+
+const containerVariants = {
+  hidden: { opacity: 1 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.1
+    }
+  }
+};
+
+const itemVariants = {
+  hidden: { y: 20, opacity: 0 },
+  visible: {
+    y: 0,
+    opacity: 1,
+    transition: {
+      duration: 0.4,
+      ease: "easeOut"
+    }
+  }
 };
 
 
@@ -108,31 +131,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, sett
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <h1 className="text-2xl font-bold text-white">Main Dashboard</h1>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <motion.div 
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
         <KpiCard
+          variants={itemVariants}
           title="Portfolio Duration"
           value={`${formatNumber(portfolio.modifiedDuration, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} yrs`}
           change={`Benchmark: ${benchmark.modifiedDuration.toFixed(2)} yrs`}
           changeColor="text-slate-400"
         />
         <KpiCard
+          variants={itemVariants}
           title="Duration Gap"
           value={`${formatNumber(durationGap, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} yrs`}
           changeColor={isDurationGapBreached ? 'text-red-400' : 'text-green-400'}
           change={breachMessage}
         />
         <KpiCard
+          variants={itemVariants}
           title="Projected Tracking Error"
           value={`${formatNumber(trackingError, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} bps`}
         />
         <KpiCard
+          variants={itemVariants}
           title="Total Market Value"
           value={formatCurrency(portfolio.totalMarketValue, 0, 0)}
         />
-      </div>
+      </motion.div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
+      <motion.div 
+        className="grid grid-cols-1 lg:grid-cols-2 gap-6"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        <Card variants={itemVariants}>
           <h3 className="text-lg font-semibold text-slate-200 mb-4">Duration Drift Forecaster (12 Months)</h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={durationDriftData}>
@@ -152,7 +189,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, sett
           </ResponsiveContainer>
         </Card>
 
-        <Card>
+        <Card variants={itemVariants}>
           <h3 className="text-lg font-semibold text-slate-200 mb-4">Key Rate Duration (KRD) Gap Summary</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={krdGapData}>
@@ -165,7 +202,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, sett
           </ResponsiveContainer>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <Card variants={itemVariants} className="lg:col-span-2">
            <h3 className="text-lg font-semibold text-slate-200 mb-4">Portfolio Analysis</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
@@ -208,7 +245,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, sett
                 </div>
             </div>
         </Card>
-      </div>
+      </motion.div>
     </div>
   );
 };

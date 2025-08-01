@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData, AppSettings, ProposedTrade } from '@/types';
 import { Card } from '@/components/shared/Card';
 import * as optimizerService from '@/services/optimizerService';
@@ -167,7 +168,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         
         const activeProposedTrades = result.proposedTrades.filter(t => activeTrades.has(t.pairId));
         
-        if (activeProposedTrades.length === 0) {
+        if (activeProposedTrades.length === 0 && result.proposedTrades.length > 0) {
             const beforeMetrics = optimizerService.calculateImpactMetrics(portfolio, benchmark);
             return {
                 ...result,
@@ -176,7 +177,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                 estimatedCost: 0,
                 estimatedCostBpsOfNav: 0,
                 estimatedCostBpsPerTradeSum: 0,
-                rationale: "No trades selected for execution."
+                rationale: "No trades selected for execution. Toggle trades on to see their impact."
             }
         }
         
@@ -213,7 +214,9 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                         <h3 className="text-lg font-semibold text-slate-200 mb-4">Setup & Constraints</h3>
                         <div className="space-y-4">
                             <div>
-                                <label htmlFor="maxTurnover" className="block text-sm font-medium text-slate-300">Max Turnover (%)</label>
+                                <label htmlFor="maxTurnover" className="block text-sm font-medium text-slate-300">
+                                    {mode === 'buy-only' ? 'New Cash to Invest (%)' : 'Max Turnover (%)'}
+                                </label>
                                 <input type="number" id="maxTurnover" value={maxTurnover} onChange={e => setMaxTurnover(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
                             </div>
                             <div>
@@ -238,8 +241,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                 </div>
                                 <p className="text-xs text-slate-500 mt-1">
                                      {mode === 'switch'
-                                        ? "Switch Trades: Cash-neutral trades to first fix the duration gap, then minimise tracking error."
-                                        : "Buy Only: Uses 'Max Turnover %' as new cash to invest, first fixing duration, then tracking error."}
+                                        ? "Cash-neutral trades to first fix the duration gap, then minimise tracking error."
+                                        : "Uses '% of NAV' as new cash to invest, first fixing duration, then tracking error."}
                                 </p>
                             </div>
                         </div>
@@ -277,16 +280,22 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                             {isLoading ? 'Optimising...' : 'Run Optimiser'}
                         </button>
                     </Card>
-                    {displayedResult && (
-                        <Card className="mt-6">
-                           <ResultsDisplay result={displayedResult} onTradeToggle={handleTradeToggle} activeTrades={activeTrades}/>
-                        </Card>
-                    )}
-                     {result && !displayedResult && ( // This handles the case where all trades are toggled off
-                        <Card className="mt-6">
-                           <ResultsDisplay result={result} onTradeToggle={handleTradeToggle} activeTrades={activeTrades}/>
-                        </Card>
-                    )}
+                     <AnimatePresence>
+                        {displayedResult && (
+                            <motion.div
+                              layout
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -20 }}
+                              transition={{ duration: 0.4 }}
+                              className="mt-6"
+                            >
+                                <Card>
+                                   <ResultsDisplay result={displayedResult} onTradeToggle={handleTradeToggle} activeTrades={activeTrades}/>
+                                </Card>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
             </div>
         </div>

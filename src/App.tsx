@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import * as dataService from '@/services/dataService';
 import { buildPortfolio, calculatePortfolioMetrics, buildBenchmark } from '@/services/portfolioService';
 import { Dashboard } from '@/components/Dashboard';
@@ -148,7 +149,17 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto bg-slate-950">
-        {renderView()}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeView}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+          >
+            {renderView()}
+          </motion.div>
+        </AnimatePresence>
       </main>
     </div>
   );

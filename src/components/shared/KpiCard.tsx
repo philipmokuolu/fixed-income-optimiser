@@ -1,8 +1,9 @@
 import React from 'react';
 import { Card } from './Card';
 import { formatNumber } from '@/utils/formatting';
+import { MotionProps } from 'framer-motion';
 
-interface KpiCardProps {
+interface KpiCardProps extends MotionProps {
   title: string;
   value: string | number;
   change?: string;
@@ -11,11 +12,11 @@ interface KpiCardProps {
   className?: string;
 }
 
-export const KpiCard: React.FC<KpiCardProps> = ({ title, value, change, changeColor, icon, className }) => {
+export const KpiCard: React.FC<KpiCardProps> = ({ title, value, change, changeColor, icon, className, ...rest }) => {
   const displayValue = typeof value === 'number' ? formatNumber(value) : value;
 
   return (
-    <Card className={`flex flex-col justify-between ${className}`}>
+    <Card className={`flex flex-col justify-between ${className}`} {...rest}>
       <div className="flex justify-between items-start">
         <h3 className="text-sm font-medium text-slate-400 uppercase tracking-wider">{title}</h3>
         {icon}
