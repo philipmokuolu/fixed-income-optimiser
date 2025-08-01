@@ -58,6 +58,11 @@ export const applyTradesToPortfolio = (
                 existing.notional = existing.marketValue / (existing.price / 100);
             } else {
                  const bondData = bondMasterData[trade.isin];
+                 // FIX: Add a guard clause to prevent crash if master data is missing for a new bond.
+                 if (!bondData) {
+                    console.warn(`Cannot apply BUY trade for ISIN ${trade.isin}: Bond master data not found. Skipping trade.`);
+                    return; // Skips this trade and continues with the next one.
+                 }
                  newBondsMap.set(trade.isin, {
                     ...bondData,
                     isin: trade.isin,
@@ -138,7 +143,7 @@ export const runOptimizer = (
                 bondToBuy = buyUniverse.sort((a,b) => b.modifiedDuration - a.modifiedDuration)[0];
             } else { // Need to DECREASE duration
                 bondToSell = eligibleToSell.sort((a,b) => b.modifiedDuration - a.modifiedDuration)[0];
-                bondToBuy = buyUniverse.sort((a,b) => a.modifiedDuration - b.modifiedDuration)[0];
+                bondToBuy = buyUniverse.sort((a,b) => a.modifiedDuration - a.modifiedDuration)[0];
             }
 
             if (bondToSell && bondToBuy) {
