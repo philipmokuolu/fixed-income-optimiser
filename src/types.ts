@@ -73,11 +73,11 @@ export interface OptimizationParams {
   maxDurationShortfall: number;
   maxDurationSurplus: number;
   maxTurnover: number;
-  minPositionSize: number;
-  maxPositionSize: number;
   transactionCost: number;
   excludedBonds: string[]; // by isin
   mode: 'switch' | 'buy-only';
+  investmentHorizonLimit: number;
+  minimumPurchaseRating: string;
 }
 
 export interface ProposedTrade {

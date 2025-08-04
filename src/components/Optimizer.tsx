@@ -13,6 +13,8 @@ interface OptimiserProps {
   appSettings: AppSettings;
 }
 
+const CREDIT_RATINGS = ['AAA', 'AA+', 'AA', 'AA-', 'A+', 'A', 'A-', 'BBB+', 'BBB', 'BBB-', 'BB+', 'BB', 'BB-', 'B+', 'B', 'B-', 'CCC+', 'CCC', 'CCC-', 'CC', 'C', 'D'];
+
 const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (pairId: number) => void, activeTrades: Set<number> }> = ({ result, onTradeToggle, activeTrades }) => {
     const ImpactRow: React.FC<{label: string, before: number, after: number, unit: string, formatOpts?: Intl.NumberFormatOptions}> = ({label, before, after, unit, formatOpts={minimumFractionDigits: 2, maximumFractionDigits: 2}}) => {
         const isImproved = (label.includes('Error') && after < before) || (!label.includes('Error') && after > before);
@@ -61,7 +63,7 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (pai
                              </thead>
                              <tbody className="divide-y divide-slate-800">
                                 {result.proposedTrades.map(trade => (
-                                    <tr key={trade.isin + trade.action + trade.pairId} className="hover:bg-slate-800/50">
+                                    <tr key={trade.isin + trade.action + trade.pairId} className={`transition-opacity ${activeTrades.has(trade.pairId) ? 'opacity-100' : 'opacity-50'} hover:bg-slate-800/50`}>
                                         <td className="px-2 py-2"><input type="checkbox" checked={activeTrades.has(trade.pairId)} onChange={() => onTradeToggle(trade.pairId)} className="form-checkbox h-4 w-4 bg-slate-700 border-slate-600 text-orange-500 rounded focus:ring-orange-500" /></td>
                                         <td className={`px-2 py-2 text-sm font-semibold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
                                         <td className="px-2 py-2 text-sm font-mono text-orange-400">{trade.isin}</td>
@@ -114,11 +116,14 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     const [mode, setMode] = useState<'switch' | 'buy-only'>('switch');
     const [excludedBonds, setExcludedBonds] = useState<string[]>([]);
     const [eligibilitySearch, setEligibilitySearch] = useState('');
+    
+    // New constraints state
+    const [investmentHorizonLimit, setInvestmentHorizonLimit] = useState(() => sessionStorage.getItem('optimiser_horizonLimit') || '10');
+    const [minimumPurchaseRating, setMinimumPurchaseRating] = useState(() => sessionStorage.getItem('optimiser_minRating') || 'BB-');
 
     const [result, setResult] = useState<OptimizationResult | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     
-    // For "what-if" analysis, now stores trade pair IDs
     const [activeTrades, setActiveTrades] = useState<Set<number>>(new Set());
     
     useEffect(() => {
@@ -128,6 +133,14 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     useEffect(() => {
         sessionStorage.setItem('optimiser_transactionCost', transactionCost);
     }, [transactionCost]);
+
+    useEffect(() => {
+        sessionStorage.setItem('optimiser_horizonLimit', investmentHorizonLimit);
+    }, [investmentHorizonLimit]);
+    
+    useEffect(() => {
+        sessionStorage.setItem('optimiser_minRating', minimumPurchaseRating);
+    }, [minimumPurchaseRating]);
 
 
     const handleRunOptimiser = useCallback(() => {
@@ -141,15 +154,16 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                 transactionCost: Number(transactionCost),
                 excludedBonds,
                 mode,
-                minPositionSize: 0, // Not implemented in this version
-                maxPositionSize: 0, // Not implemented in this version
+                investmentHorizonLimit: Number(investmentHorizonLimit),
+                minimumPurchaseRating: minimumPurchaseRating,
             };
             const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData);
             setResult(optoResult);
+            // Initially, all proposed trades are active
             setActiveTrades(new Set(optoResult.proposedTrades.map(t => t.pairId)));
             setIsLoading(false);
         }, 500); // simulate async work
-    }, [maxTurnover, transactionCost, excludedBonds, mode, portfolio, benchmark, bondMasterData, appSettings]);
+    }, [maxTurnover, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, portfolio, benchmark, bondMasterData, appSettings]);
     
     const handleTradeToggle = (pairId: number) => {
         setActiveTrades(prev => {
@@ -168,16 +182,17 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         
         const activeProposedTrades = result.proposedTrades.filter(t => activeTrades.has(t.pairId));
         
-        if (activeProposedTrades.length === 0 && result.proposedTrades.length > 0) {
-            const beforeMetrics = optimizerService.calculateImpactMetrics(portfolio, benchmark);
+        const beforeMetrics = optimizerService.calculateImpactMetrics(portfolio, benchmark);
+
+        if (activeProposedTrades.length === 0) {
             return {
                 ...result,
-                proposedTrades: [],
                 impactAnalysis: { before: beforeMetrics, after: beforeMetrics },
                 estimatedCost: 0,
                 estimatedCostBpsOfNav: 0,
                 estimatedCostBpsPerTradeSum: 0,
-                rationale: "No trades selected for execution. Toggle trades on to see their impact."
+                // keep original rationale but show only active trades
+                proposedTrades: result.proposedTrades, // show all trades
             }
         }
         
@@ -190,11 +205,11 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         
         return {
             ...result,
-            proposedTrades: activeProposedTrades, // Show only active trades in the table
-            impactAnalysis: { before: optimizerService.calculateImpactMetrics(portfolio, benchmark), after: afterMetrics },
+            impactAnalysis: { before: beforeMetrics, after: afterMetrics },
             estimatedCost,
             estimatedCostBpsOfNav: portfolio.totalMarketValue > 0 ? (estimatedCost / portfolio.totalMarketValue) * 10000 : 0,
             estimatedCostBpsPerTradeSum: Number(transactionCost) * activeProposedTrades.length,
+            proposedTrades: result.proposedTrades,
         }
     }, [result, activeTrades, portfolio, benchmark, bondMasterData, transactionCost]);
 
@@ -222,6 +237,18 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                             <div>
                                 <label htmlFor="transactionCost" className="block text-sm font-medium text-slate-300">Transaction Cost per Trade (bps)</label>
                                 <input type="number" id="transactionCost" value={transactionCost} onChange={e => setTransactionCost(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                            </div>
+                             <div>
+                                <label htmlFor="horizonLimit" className="block text-sm font-medium text-slate-300">Investment Horizon Limit (Yrs)</label>
+                                <input type="number" id="horizonLimit" value={investmentHorizonLimit} onChange={e => setInvestmentHorizonLimit(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                                <p className="text-xs text-slate-500 mt-1">Limits the maximum maturity of bonds the optimiser can buy.</p>
+                            </div>
+                             <div>
+                                <label htmlFor="minRating" className="block text-sm font-medium text-slate-300">Minimum Purchase Rating</label>
+                                <select id="minRating" value={minimumPurchaseRating} onChange={e => setMinimumPurchaseRating(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                                    {CREDIT_RATINGS.map(r => <option key={r} value={r}>{r}</option>)}
+                                </select>
+                                <p className="text-xs text-slate-500 mt-1">Sets the minimum credit quality for any proposed buys.</p>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-300">Optimisation Mode</label>

@@ -153,7 +153,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, sett
         />
         <KpiCard
           variants={itemVariants}
-          title="Projected Tracking Error"
+          title="Projected TE (Duration)"
           value={`${formatNumber(trackingError, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} bps`}
         />
         <KpiCard

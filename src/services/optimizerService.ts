@@ -4,6 +4,16 @@ import { formatCurrency } from '@/utils/formatting';
 
 const MIN_TRADE_SIZE = 1000; // Minimum trade size in currency to be considered
 
+const RATING_SCALE: { [key: string]: number } = {
+  'AAA': 1, 'AA+': 2, 'AA': 3, 'AA-': 4,
+  'A+': 5, 'A': 6, 'A-': 7,
+  'BBB+': 8, 'BBB': 9, 'BBB-': 10,
+  'BB+': 11, 'BB': 12, 'BB-': 13,
+  'B+': 14, 'B': 15, 'B-': 16,
+  'CCC+': 17, 'CCC': 18, 'CCC-': 19,
+  'CC': 20, 'C': 21, 'D': 22
+};
+
 export const calculateImpactMetrics = (portfolio: Portfolio, benchmark: Benchmark): ImpactMetrics => {
     return {
         modifiedDuration: portfolio.modifiedDuration,
@@ -110,6 +120,23 @@ export const runOptimizer = (
     let buyUniverse = Object.entries(bondMasterData)
         .filter(([isin]) => !portfolioIsins.has(isin))
         .map(([isin, staticData]) => ({ ...staticData, isin } as (BondStaticData & {isin: string})))
+        .filter(bond => {
+            // Maturity filter
+            const today = new Date();
+            const maturityDate = new Date(bond.maturityDate);
+            const yearsToMaturity = (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+            if (yearsToMaturity > params.investmentHorizonLimit) {
+                return false;
+            }
+            
+            // Rating filter
+            const minRatingValue = RATING_SCALE[params.minimumPurchaseRating];
+            const bondRatingValue = RATING_SCALE[bond.creditRating];
+            if (!minRatingValue || !bondRatingValue || bondRatingValue > minRatingValue) {
+                return false;
+            }
+            return true;
+        })
         .sort((a, b) => a.modifiedDuration - b.modifiedDuration); // Sorted low to high duration
     
     // --- MODE: BUY ONLY ---
@@ -296,7 +323,7 @@ export const runOptimizer = (
     
     // --- FINALIZATION ---
     if (proposedTrades.length === 0) {
-        return emptyResult("Portfolio is already optimal given the constraints.");
+        return emptyResult("Portfolio is already optimal given the constraints. No suitable trades found in the universe.");
     }
 
     const finalPortfolio = calculatePortfolioMetrics(currentBonds);
