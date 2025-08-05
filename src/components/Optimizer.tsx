@@ -54,6 +54,7 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (pai
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Action</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">ISIN</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Name</th>
+                                    <th className="px-2 py-2 text-center text-xs font-medium text-slate-400 uppercase">Rating</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">M.Val</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Notional</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Price</th>
@@ -68,6 +69,7 @@ const ResultsDisplay: React.FC<{ result: OptimizationResult, onTradeToggle: (pai
                                         <td className={`px-2 py-2 text-sm font-semibold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
                                         <td className="px-2 py-2 text-sm font-mono text-orange-400">{trade.isin}</td>
                                         <td className="px-2 py-2 text-sm max-w-xs truncate">{trade.name}</td>
+                                        <td className="px-2 py-2 text-sm text-center font-mono">{trade.creditRating}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.marketValue, 0, 0)}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.notional, {maximumFractionDigits: 0})}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.price, {minimumFractionDigits: 2})}</td>

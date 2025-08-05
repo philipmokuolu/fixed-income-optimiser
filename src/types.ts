@@ -89,6 +89,7 @@ export interface ProposedTrade {
   price: number;
   modifiedDuration: number;
   yieldToMaturity: number;
+  creditRating: string;
   pairId: number; // To link buy/sell pairs
 }
 

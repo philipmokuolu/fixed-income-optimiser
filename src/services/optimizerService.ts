@@ -34,6 +34,7 @@ const createTradeObject = (action: 'BUY' | 'SELL', bond: Bond | (BondStaticData 
         price: bond.price,
         modifiedDuration: bond.modifiedDuration,
         yieldToMaturity: bond.yieldToMaturity,
+        creditRating: bond.creditRating,
         pairId,
     };
 };
@@ -122,10 +123,13 @@ export const runOptimizer = (
         .map(([isin, staticData]) => ({ ...staticData, isin } as (BondStaticData & {isin: string})))
         .filter(bond => {
             // Maturity filter
+            const limit = params.investmentHorizonLimit;
             const today = new Date();
             const maturityDate = new Date(bond.maturityDate);
             const yearsToMaturity = (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-            if (yearsToMaturity > params.investmentHorizonLimit) {
+            
+            // Exclude if limit is invalid, maturity is invalid, or maturity exceeds limit.
+            if (isNaN(limit) || isNaN(yearsToMaturity) || yearsToMaturity > limit) {
                 return false;
             }
             
