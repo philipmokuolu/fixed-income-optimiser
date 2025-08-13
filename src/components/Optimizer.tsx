@@ -4,7 +4,7 @@ import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStati
 import { Card } from '@/components/shared/Card';
 import * as optimizerService from '@/services/optimizerService';
 import { formatNumber, formatCurrency, formatCurrencyM } from '@/utils/formatting';
-import { calculatePortfolioMetrics, applyTradesToPortfolio } from '@/services/portfolioService';
+import { calculatePortfolioMetrics, calculateTrackingError } from '@/services/portfolioService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Sector } from 'recharts';
 
 
@@ -117,7 +117,7 @@ const ResultsDisplay: React.FC<{
                 <div className="space-y-1">
                     <ImpactRow label="Modified Duration" before={result.impactAnalysis.before.modifiedDuration} after={afterPortfolio.modifiedDuration} unit=" yrs" />
                     <ImpactRow label="Duration Gap" before={result.impactAnalysis.before.durationGap} after={afterPortfolio.modifiedDuration - benchmark.modifiedDuration} unit=" yrs" />
-                    <ImpactRow label="Tracking Error" before={result.impactAnalysis.before.trackingError} after={optimizerService.calculateTrackingError(afterPortfolio, benchmark)} unit=" bps" />
+                    <ImpactRow label="Tracking Error" before={result.impactAnalysis.before.trackingError} after={calculateTrackingError(afterPortfolio, benchmark)} unit=" bps" />
                     <ImpactRow label="Portfolio Yield" before={result.impactAnalysis.before.yield} after={afterPortfolio.averageYield} unit=" %" />
                 </div>
             </div>
@@ -331,7 +331,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             }
         }
         
-        const afterPortfolioBonds = applyTradesToPortfolio(portfolio.bonds, activeProposedTrades, bondMasterData);
+        const afterPortfolioBonds = optimizerService.applyTradesToPortfolio(portfolio.bonds, activeProposedTrades, bondMasterData);
         const afterPortfolio = calculatePortfolioMetrics(afterPortfolioBonds);
         
         const activeTradedValue = activeProposedTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
