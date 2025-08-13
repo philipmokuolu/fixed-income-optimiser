@@ -30,7 +30,7 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
     };
 
     const handleBondMasterUpload = async (file: File) => {
-        const expectedHeaders = ['isin', 'name', 'currency', 'maturityDate', 'coupon', 'price', 'yieldToMaturity', 'modifiedDuration', 'creditRating', 'liquidityScore', ...KRD_TENORS.map(t => `krd_${t}`)];
+        const expectedHeaders = ['isin', 'name', 'currency', 'maturityDate', 'coupon', 'price', 'yieldToMaturity', 'modifiedDuration', 'creditRating', 'liquidityScore', 'bidAskSpread', ...KRD_TENORS.map(t => `krd_${t}`)];
         const bondMasterJson = await parseCsvToJson<(BondStaticData & { isin: string })>(file, expectedHeaders);
         
         const bondMasterRecord = bondMasterJson.reduce((acc, bond) => {
@@ -103,7 +103,7 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
                 <FileUploadCard
                     title="2. Bond Master & Universe"
                     description="Static and market data for all bonds in your portfolio AND any off-benchmark bonds for the Optimiser."
-                    expectedColumns={['isin', 'name', 'price', 'modifiedDuration', '...etc']}
+                    expectedColumns={['isin', 'name', 'price', 'modifiedDuration', 'bidAskSpread', '...etc']}
                     onFileUpload={handleBondMasterUpload}
                 />
                  <Card>

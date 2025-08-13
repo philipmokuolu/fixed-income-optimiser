@@ -20,11 +20,15 @@ export const calculateImpactMetrics = (portfolio: Portfolio, benchmark: Benchmar
         durationGap: portfolio.modifiedDuration - benchmark.modifiedDuration,
         trackingError: calculateTrackingError(portfolio, benchmark),
         yield: portfolio.averageYield,
+        portfolio: portfolio,
     };
 };
 
 const createTradeObject = (action: 'BUY' | 'SELL', bond: Bond | (BondStaticData & {isin: string}), marketValue: number, pairId: number): ProposedTrade => {
     const notional = marketValue / (bond.price / 100);
+    // Cost of crossing half the spread: Notional * (Spread_in_Price_Terms / 100) / 2
+    const spreadCost = notional * (bond.bidAskSpread / 100) / 2;
+
     return {
         action,
         isin: bond.isin,
@@ -34,8 +38,8 @@ const createTradeObject = (action: 'BUY' | 'SELL', bond: Bond | (BondStaticData 
         price: bond.price,
         modifiedDuration: bond.modifiedDuration,
         yieldToMaturity: bond.yieldToMaturity,
-        creditRating: bond.creditRating,
         pairId,
+        spreadCost,
     };
 };
 
@@ -107,7 +111,7 @@ export const runOptimizer = (
     const emptyResult = (rationale: string) => ({
         proposedTrades: [],
         impactAnalysis: { before: beforeMetrics, after: beforeMetrics },
-        estimatedCost: 0, estimatedCostBpsOfNav: 0, estimatedCostBpsPerTradeSum: 0,
+        estimatedCost: 0, estimatedFeeCost: 0, estimatedSpreadCost: 0, estimatedCostBpsOfNav: 0, estimatedCostBpsPerTradeSum: 0,
         rationale,
     });
 
@@ -120,16 +124,13 @@ export const runOptimizer = (
     
     let buyUniverse = Object.entries(bondMasterData)
         .filter(([isin]) => !portfolioIsins.has(isin))
-        .map(([isin, staticData]) => ({ ...staticData, isin } as (BondStaticData & {isin: string})))
+        .map(([isin, staticData]) => ({ ...staticData, isin } as (Bond & {isin: string})))
         .filter(bond => {
             // Maturity filter
-            const limit = params.investmentHorizonLimit;
             const today = new Date();
             const maturityDate = new Date(bond.maturityDate);
             const yearsToMaturity = (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-            
-            // Exclude if limit is invalid, maturity is invalid, or maturity exceeds limit.
-            if (isNaN(limit) || isNaN(yearsToMaturity) || yearsToMaturity > limit) {
+            if (yearsToMaturity > params.investmentHorizonLimit) {
                 return false;
             }
             
@@ -143,8 +144,58 @@ export const runOptimizer = (
         })
         .sort((a, b) => a.modifiedDuration - b.modifiedDuration); // Sorted low to high duration
     
+    let eligibleToSell = initialPortfolio.bonds.filter(b => !params.excludedBonds.includes(b.isin)).sort((a, b) => a.modifiedDuration - b.modifiedDuration);
+
+
+    // --- MODE: SELL ONLY ---
+    if (mode === 'sell-only') {
+        const cashToRaise = params.cashToRaise || 0;
+        let cashRaised = 0;
+        let iterations = 0;
+        
+        while (cashRaised < cashToRaise && eligibleToSell.length > 0 && iterations < MAX_ITERATIONS) {
+            const tradeAmount = Math.min(cashToRaise / 5, cashToRaise - cashRaised); // Raise in 5 increments or remaining amount
+            if (tradeAmount < MIN_TRADE_SIZE) break;
+
+            let bestSale: { trade: ProposedTrade, bond: Bond, te: number } | null = null;
+            
+            // Find the best bond to sell
+            for (const bondToSell of eligibleToSell) {
+                if(bondToSell.marketValue < tradeAmount) continue; // can't sell more than we have
+
+                const sellTrade = createTradeObject('SELL', bondToSell, tradeAmount, iterations);
+                const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade], bondMasterData);
+                const tempPortfolio = calculatePortfolioMetrics(tempBonds);
+                const tempTE = calculateTrackingError(tempPortfolio, benchmark);
+                const tempDurationGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
+                
+                // We prefer sales that don't breach duration limits and have the best TE
+                if (tempDurationGap > -maxDurationShortfall && tempDurationGap < maxDurationSurplus) {
+                    if (bestSale === null || tempTE < bestSale.te) {
+                        bestSale = { trade: sellTrade, bond: bondToSell, te: tempTE };
+                    }
+                }
+            }
+
+            if (bestSale) {
+                proposedTrades.push(bestSale.trade);
+                cashRaised += bestSale.trade.marketValue;
+                currentBonds = applyTradesToPortfolio(currentBonds, [bestSale.trade], bondMasterData);
+                currentPortfolio = calculatePortfolioMetrics(currentBonds);
+                // Make bond ineligible for next iteration to ensure diversity of sales
+                eligibleToSell = eligibleToSell.filter(b => b.isin !== bestSale!.bond.isin);
+                if (!rationaleSteps.length) rationaleSteps.push(`Objective: Raise ${formatCurrency(cashToRaise,0,0)} cash while minimizing risk profile deterioration.`);
+            } else {
+                rationaleSteps.push("Halted: No further sales possible without breaching duration constraints.");
+                break;
+            }
+            iterations++;
+        }
+        if (iterations > 0) rationaleSteps.push(`Raised ${formatCurrency(cashRaised,0,0)} by selling bonds with the least impact on tracking error.`);
+    }
+
     // --- MODE: BUY ONLY ---
-    if (mode === 'buy-only') {
+    else if (mode === 'buy-only') {
         const cashToInvest = (maxTurnover / 100) * initialPortfolio.totalMarketValue;
         let cashSpent = 0;
         let durationGap = beforeMetrics.durationGap;
@@ -163,7 +214,6 @@ export const runOptimizer = (
                 ? buyUniverse[buyUniverse.length - 1] // buy highest duration
                 : buyUniverse[0]; // buy lowest duration
 
-            // Edge Case: If trying to shorten duration, but the lowest duration bond available is still longer than the portfolio's average, stop.
             if (!isPortfolioShort && bondToBuy.modifiedDuration > currentPortfolio.modifiedDuration) {
                 rationaleSteps.push(`Halted duration correction: Lowest duration bond available (${bondToBuy.modifiedDuration.toFixed(2)}) is still higher than the portfolio's average (${currentPortfolio.modifiedDuration.toFixed(2)}), so buying it would worsen the gap.`);
                 break;
@@ -192,7 +242,6 @@ export const runOptimizer = (
             let teCashSpent = 0;
             let teIterations = 0;
             while(teCashSpent < cashRemaining && teIterations < MAX_ITERATIONS && buyUniverse.length > 0) {
-                // Find best bond to fix largest KRD gap
                 const krdGaps = KRD_TENORS.map(t => ({ tenor: t, gap: currentPortfolio[`krd_${t}`] - benchmark[`krd_${t}`] })).sort((a,b) => Math.abs(b.gap) - Math.abs(a.gap));
                 const largestGap = krdGaps[0];
                 if (!largestGap || Math.abs(largestGap.gap) < 0.01) break;
@@ -202,7 +251,7 @@ export const runOptimizer = (
 
                 const buyCandidates = [...buyUniverse].sort((a,b) => isKrdShort ? b[krdKeyToFix] - a[krdKeyToFix] : a[krdKeyToFix] - b[krdKeyToFix]);
 
-                let bestSafeBuy: { trade: ProposedTrade, bond: (BondStaticData & {isin: string}) } | null = null;
+                let bestSafeBuy: { trade: ProposedTrade, bond: (Bond & {isin: string}) } | null = null;
                 for (const bondToBuy of buyCandidates) {
                      const tradeAmount = Math.min(cashRemaining / 10, cashRemaining - teCashSpent);
                      if (tradeAmount < MIN_TRADE_SIZE) continue;
@@ -238,8 +287,7 @@ export const runOptimizer = (
         let totalTradedValue = 0;
         const maxTradeValue = (maxTurnover / 100) * initialPortfolio.totalMarketValue;
         const tradeSizeIncrement = maxTradeValue / 10; // Make 10 small trades up to max turnover
-        let eligibleToSell = initialPortfolio.bonds.filter(b => !params.excludedBonds.includes(b.isin)).sort((a, b) => a.modifiedDuration - b.modifiedDuration);
-
+        
         let durationGap = beforeMetrics.durationGap;
         let iterations = 0;
 
@@ -288,7 +336,7 @@ export const runOptimizer = (
             const sellCandidates = [...eligibleToSell].sort((a, b) => isKrdShort ? a[krdKeyToFix] - b[krdKeyToFix] : b[krdKeyToFix] - a[krdKeyToFix]);
             const buyCandidates = [...buyUniverse].sort((a, b) => isKrdShort ? b[krdKeyToFix] - a[krdKeyToFix] : a[krdKeyToFix] - b[krdKeyToFix]);
 
-            let bestTradePair: { sellTrade: ProposedTrade, buyTrade: ProposedTrade, sellBond: Bond, buyBond: (BondStaticData & {isin: string})} | null = null;
+            let bestTradePair: { sellTrade: ProposedTrade, buyTrade: ProposedTrade, sellBond: Bond, buyBond: (Bond & {isin: string})} | null = null;
             for (const bondToSell of sellCandidates) {
                 for (const bondToBuy of buyCandidates) {
                     const tradeAmount = Math.min(tradeSizeIncrement, maxTradeValue - totalTradedValue, bondToSell.marketValue);
@@ -334,7 +382,9 @@ export const runOptimizer = (
     const afterMetrics = calculateImpactMetrics(finalPortfolio, benchmark);
     
     const finalTradedValue = proposedTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
-    const estimatedCost = finalTradedValue * (transactionCost / 10000);
+    const estimatedFeeCost = finalTradedValue * (transactionCost / 10000);
+    const estimatedSpreadCost = proposedTrades.reduce((sum, trade) => sum + trade.spreadCost, 0);
+    const estimatedCost = estimatedFeeCost + estimatedSpreadCost;
 
     let finalRationale = rationaleSteps.join(' ');
     if (finalRationale.trim() === '') {
@@ -345,6 +395,8 @@ export const runOptimizer = (
         proposedTrades,
         impactAnalysis: { before: beforeMetrics, after: afterMetrics },
         estimatedCost,
+        estimatedFeeCost,
+        estimatedSpreadCost,
         estimatedCostBpsOfNav: initialPortfolio.totalMarketValue > 0 ? (estimatedCost / finalPortfolio.totalMarketValue) * 10000 : 0,
         estimatedCostBpsPerTradeSum: transactionCost * proposedTrades.length,
         rationale: finalRationale,

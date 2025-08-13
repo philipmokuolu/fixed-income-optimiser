@@ -31,7 +31,9 @@ export interface BenchmarkHolding {
 }
 
 // Represents the master data for a bond, excluding position-specific details.
-export type BondStaticData = Omit<Bond, 'isin' | 'notional' | 'marketValue' | 'portfolioWeight' | 'durationContribution'>;
+export interface BondStaticData extends Omit<Bond, 'isin' | 'notional' | 'marketValue' | 'portfolioWeight' | 'durationContribution'> {
+  bidAskSpread: number;
+}
 
 // Data structure for a single bond holding in the portfolio
 export interface Bond extends KRDFields {
@@ -49,6 +51,7 @@ export interface Bond extends KRDFields {
   modifiedDuration: number;
   creditRating: string;
   liquidityScore: number;
+  bidAskSpread: number;
 }
 
 // Aggregate data for the entire portfolio
@@ -75,9 +78,10 @@ export interface OptimizationParams {
   maxTurnover: number;
   transactionCost: number;
   excludedBonds: string[]; // by isin
-  mode: 'switch' | 'buy-only';
+  mode: 'switch' | 'buy-only' | 'sell-only';
   investmentHorizonLimit: number;
   minimumPurchaseRating: string;
+  cashToRaise?: number;
 }
 
 export interface ProposedTrade {
@@ -89,8 +93,8 @@ export interface ProposedTrade {
   price: number;
   modifiedDuration: number;
   yieldToMaturity: number;
-  creditRating: string;
   pairId: number; // To link buy/sell pairs
+  spreadCost: number;
 }
 
 export interface ImpactMetrics {
@@ -98,6 +102,7 @@ export interface ImpactMetrics {
     durationGap: number;
     trackingError: number;
     yield: number;
+    portfolio: Portfolio; // The full portfolio object for this state
 }
 
 export interface OptimizationResult {
@@ -107,6 +112,8 @@ export interface OptimizationResult {
     after: ImpactMetrics;
   };
   estimatedCost: number; // Dollar value
+  estimatedFeeCost: number;
+  estimatedSpreadCost: number;
   estimatedCostBpsOfNav: number; // Cost as bps of total portfolio value
   estimatedCostBpsPerTradeSum: number; // Sum of per-trade bps costs
   rationale?: string;
