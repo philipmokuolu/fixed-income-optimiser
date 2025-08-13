@@ -81,6 +81,7 @@ export interface OptimizationParams {
   mode: 'switch' | 'buy-only' | 'sell-only';
   investmentHorizonLimit: number;
   minimumPurchaseRating: string;
+  minimumYield?: number;
   cashToRaise?: number;
 }
 

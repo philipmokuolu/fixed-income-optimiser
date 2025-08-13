@@ -4,7 +4,7 @@ import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStati
 import { Card } from '@/components/shared/Card';
 import * as optimizerService from '@/services/optimizerService';
 import { formatNumber, formatCurrency, formatCurrencyM } from '@/utils/formatting';
-import { calculatePortfolioMetrics, calculateTrackingError } from '@/services/portfolioService';
+import { calculatePortfolioMetrics, applyTradesToPortfolio } from '@/services/portfolioService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Sector } from 'recharts';
 
 
@@ -76,18 +76,22 @@ const ResultsDisplay: React.FC<{
         
         const preTradeRatings = calculateCreditRatingSplit(initialPortfolio.bonds);
         const postTradeRatings = calculateCreditRatingSplit(afterPortfolio.bonds);
+        const preTotal = initialPortfolio.totalMarketValue;
+        const postTotal = afterPortfolio.totalMarketValue;
     
         const allRatings = new Set([...Object.keys(preTradeRatings), ...Object.keys(postTradeRatings)]);
         const sortedRatings = Array.from(allRatings).sort((a,b) => (RATING_ORDER[a] || 99) - (RATING_ORDER[b] || 99));
     
         return sortedRatings.map(rating => {
-            const pre = preTradeRatings[rating] || 0;
-            const post = postTradeRatings[rating] || 0;
+            const preValue = preTradeRatings[rating] || 0;
+            const postValue = postTradeRatings[rating] || 0;
+            const prePercent = preTotal > 0 ? (preValue / preTotal) * 100 : 0;
+            const postPercent = postTotal > 0 ? (postValue / postTotal) * 100 : 0;
             return {
                 rating,
-                preValue: pre,
-                postValue: post,
-                change: post - pre,
+                prePercent,
+                postPercent,
+                changePercent: postPercent - prePercent,
             }
         });
     }, [result, initialPortfolio, afterPortfolio]);
@@ -117,7 +121,7 @@ const ResultsDisplay: React.FC<{
                 <div className="space-y-1">
                     <ImpactRow label="Modified Duration" before={result.impactAnalysis.before.modifiedDuration} after={afterPortfolio.modifiedDuration} unit=" yrs" />
                     <ImpactRow label="Duration Gap" before={result.impactAnalysis.before.durationGap} after={afterPortfolio.modifiedDuration - benchmark.modifiedDuration} unit=" yrs" />
-                    <ImpactRow label="Tracking Error" before={result.impactAnalysis.before.trackingError} after={calculateTrackingError(afterPortfolio, benchmark)} unit=" bps" />
+                    <ImpactRow label="Tracking Error" before={result.impactAnalysis.before.trackingError} after={optimizerService.calculateTrackingError(afterPortfolio, benchmark)} unit=" bps" />
                     <ImpactRow label="Portfolio Yield" before={result.impactAnalysis.before.yield} after={afterPortfolio.averageYield} unit=" %" />
                 </div>
             </div>
@@ -133,10 +137,10 @@ const ResultsDisplay: React.FC<{
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Action</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">ISIN</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Name</th>
+                                    <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Notional</th>
+                                    <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Yield (%)</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">M.Val</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Spread Cost ($)</th>
-                                    <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Price</th>
-                                    <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Dur</th>
                                 </tr>
                              </thead>
                              <tbody className="divide-y divide-slate-800">
@@ -146,10 +150,10 @@ const ResultsDisplay: React.FC<{
                                         <td className={`px-2 py-2 text-sm font-semibold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
                                         <td className="px-2 py-2 text-sm font-mono text-orange-400">{trade.isin}</td>
                                         <td className="px-2 py-2 text-sm max-w-xs truncate">{trade.name}</td>
+                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.notional, {maximumFractionDigits: 0})}</td>
+                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.yieldToMaturity, {minimumFractionDigits: 2})}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.marketValue, 0, 0)}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.spreadCost, 2, 2)}</td>
-                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.price, {minimumFractionDigits: 2})}</td>
-                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.modifiedDuration, {minimumFractionDigits: 2})}</td>
                                     </tr>
                                 ))}
                              </tbody>
@@ -214,18 +218,18 @@ const ResultsDisplay: React.FC<{
                                 <thead className="bg-slate-900/50">
                                     <tr>
                                         <th className="px-3 py-2 text-left text-xs font-medium text-slate-400 uppercase">Rating</th>
-                                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Pre-Trade ($)</th>
-                                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Post-Trade ($)</th>
-                                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Change ($)</th>
+                                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Pre-Trade (%)</th>
+                                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Post-Trade (%)</th>
+                                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Change (%)</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-800">
-                                    {ratingData?.map(({ rating, preValue, postValue, change }) => (
+                                    {ratingData?.map(({ rating, prePercent, postPercent, changePercent }) => (
                                         <tr key={rating} className="hover:bg-slate-800/50">
                                             <td className="px-3 py-2 text-sm font-semibold">{rating}</td>
-                                            <td className="px-3 py-2 text-right text-sm font-mono">{formatCurrency(preValue, 0)}</td>
-                                            <td className="px-3 py-2 text-right text-sm font-mono">{formatCurrency(postValue, 0)}</td>
-                                            <td className={`px-3 py-2 text-right text-sm font-mono ${change === 0 ? 'text-slate-400' : change > 0 ? 'text-green-400' : 'text-red-400'}`}>{change > 0 ? '+' : ''}{formatCurrency(change, 0)}</td>
+                                            <td className="px-3 py-2 text-right text-sm font-mono">{formatNumber(prePercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
+                                            <td className="px-3 py-2 text-right text-sm font-mono">{formatNumber(postPercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
+                                            <td className={`px-3 py-2 text-right text-sm font-mono ${changePercent === 0 ? 'text-slate-400' : changePercent > 0 ? 'text-green-400' : 'text-red-400'}`}>{changePercent > 0 ? '+' : ''}{formatNumber(changePercent, {minimumFractionDigits: 3, maximumFractionDigits: 3})}%</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -256,11 +260,22 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     // New constraints state
     const [investmentHorizonLimit, setInvestmentHorizonLimit] = useState(() => sessionStorage.getItem('optimiser_horizonLimit') || '10');
     const [minimumPurchaseRating, setMinimumPurchaseRating] = useState(() => sessionStorage.getItem('optimiser_minRating') || 'BB-');
+    const [minimumYield, setMinimumYield] = useState(() => sessionStorage.getItem('optimiser_minimumYield') || '3.0');
 
-    const [result, setResult] = useState<OptimizationResult | null>(null);
+    const [result, setResult] = useState<OptimizationResult | null>(() => {
+        try {
+            const saved = sessionStorage.getItem('optimiser_result');
+            return saved ? JSON.parse(saved) : null;
+        } catch (e) { return null; }
+    });
     const [isLoading, setIsLoading] = useState(false);
     
-    const [activeTrades, setActiveTrades] = useState<Set<number>>(new Set());
+    const [activeTrades, setActiveTrades] = useState<Set<number>>(() => {
+        try {
+            const saved = sessionStorage.getItem('optimiser_activeTrades');
+            return saved ? new Set(JSON.parse(saved)) : new Set();
+        } catch (e) { return new Set(); }
+    });
     
     useEffect(() => {
         sessionStorage.setItem('optimiser_maxTurnover', maxTurnover);
@@ -281,6 +296,22 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     useEffect(() => {
         sessionStorage.setItem('optimiser_minRating', minimumPurchaseRating);
     }, [minimumPurchaseRating]);
+    
+    useEffect(() => {
+        sessionStorage.setItem('optimiser_minimumYield', minimumYield);
+    }, [minimumYield]);
+    
+    useEffect(() => {
+        if (result) {
+            sessionStorage.setItem('optimiser_result', JSON.stringify(result));
+        } else {
+            sessionStorage.removeItem('optimiser_result');
+        }
+    }, [result]);
+
+    useEffect(() => {
+        sessionStorage.setItem('optimiser_activeTrades', JSON.stringify(Array.from(activeTrades)));
+    }, [activeTrades]);
 
 
     const handleRunOptimiser = useCallback(() => {
@@ -296,6 +327,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                 mode,
                 investmentHorizonLimit: Number(investmentHorizonLimit),
                 minimumPurchaseRating: minimumPurchaseRating,
+                minimumYield: Number(minimumYield),
                 cashToRaise: mode === 'sell-only' ? Number(cashToRaise) : undefined,
             };
             const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData);
@@ -303,7 +335,12 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             setActiveTrades(new Set(optoResult.proposedTrades.map(t => t.pairId)));
             setIsLoading(false);
         }, 500); // simulate async work
-    }, [maxTurnover, cashToRaise, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, portfolio, benchmark, bondMasterData, appSettings]);
+    }, [maxTurnover, cashToRaise, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, minimumYield, portfolio, benchmark, bondMasterData, appSettings]);
+    
+    const handleResetOptimiser = () => {
+        setResult(null);
+        setActiveTrades(new Set());
+    };
     
     const handleTradeToggle = (pairId: number) => {
         setActiveTrades(prev => {
@@ -331,7 +368,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             }
         }
         
-        const afterPortfolioBonds = optimizerService.applyTradesToPortfolio(portfolio.bonds, activeProposedTrades, bondMasterData);
+        const afterPortfolioBonds = applyTradesToPortfolio(portfolio.bonds, activeProposedTrades, bondMasterData);
         const afterPortfolio = calculatePortfolioMetrics(afterPortfolioBonds);
         
         const activeTradedValue = activeProposedTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
@@ -389,6 +426,11 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                 </select>
                                 <p className="text-xs text-slate-500 mt-1">Sets the minimum credit quality for any proposed buys.</p>
                             </div>
+                             <div>
+                                <label htmlFor="minYield" className="block text-sm font-medium text-slate-300">Minimum Portfolio Yield (%)</label>
+                                <input type="number" step="0.05" id="minYield" value={minimumYield} onChange={e => setMinimumYield(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                                <p className="text-xs text-slate-500 mt-1">Ensures the post-trade yield does not fall below this value.</p>
+                            </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-300">Optimisation Mode</label>
                                 <div className="mt-1 grid grid-cols-3 gap-2 p-1 bg-slate-800 rounded-lg">
@@ -428,9 +470,16 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                      <Card>
                         <h3 className="text-lg font-semibold text-slate-200 mb-2">Execution</h3>
                         <p className="text-sm text-slate-400 mb-4">Click "Run Optimiser" to generate a set of trades to minimise risk based on your constraints.</p>
-                        <button onClick={handleRunOptimiser} disabled={isLoading} className="w-full bg-orange-600 text-white font-bold py-3 px-4 rounded-md hover:bg-orange-700 transition-colors disabled:bg-slate-700 disabled:cursor-not-allowed">
-                            {isLoading ? 'Optimising...' : 'Run Optimiser'}
-                        </button>
+                         <div className="flex items-center space-x-4">
+                            <button onClick={handleRunOptimiser} disabled={isLoading} className="flex-1 bg-orange-600 text-white font-bold py-3 px-4 rounded-md hover:bg-orange-700 transition-colors disabled:bg-slate-700 disabled:cursor-not-allowed">
+                                {isLoading ? 'Optimising...' : 'Run Optimiser'}
+                            </button>
+                            {result && (
+                                <button onClick={handleResetOptimiser} disabled={isLoading} className="bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-md hover:bg-slate-600 transition-colors">
+                                    Reset
+                                </button>
+                            )}
+                        </div>
                     </Card>
                      <AnimatePresence>
                         {displayedResult && (

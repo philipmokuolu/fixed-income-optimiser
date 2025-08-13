@@ -1,4 +1,4 @@
-import { Portfolio, Bond, KRDFields, KrdKey, KRD_TENORS, Benchmark, KrdTenor, PortfolioHolding, BondStaticData, BenchmarkHolding } from '@/types';
+import { Portfolio, Bond, KRDFields, KrdKey, KRD_TENORS, Benchmark, KrdTenor, PortfolioHolding, BondStaticData, BenchmarkHolding, ProposedTrade } from '@/types';
 
 export const buildPortfolio = (
   holdings: PortfolioHolding[], 
@@ -166,3 +166,65 @@ export const calculateScenarioPnl = (
   
   return { pnl, pnlPercent };
 };
+
+// This function was previously in optimizerService, moved here for better separation of concerns
+// and to fix circular dependency issues.
+export const applyTradesToPortfolio = (
+    currentBonds: Bond[], 
+    tradesToApply: ProposedTrade[],
+    bondMasterData: Record<string, BondStaticData>
+): Bond[] => {
+    const newBondsMap = new Map<string, {notional: number, staticData: BondStaticData}>();
+
+    // Populate map with existing bonds
+    currentBonds.forEach(bond => {
+        const staticData: BondStaticData = {
+            name: bond.name, currency: bond.currency, maturityDate: bond.maturityDate, coupon: bond.coupon,
+            price: bond.price, yieldToMaturity: bond.yieldToMaturity, modifiedDuration: bond.modifiedDuration,
+            creditRating: bond.creditRating, liquidityScore: bond.liquidityScore, bidAskSpread: bond.bidAskSpread,
+            krd_1y: bond.krd_1y, krd_2y: bond.krd_2y, krd_3y: bond.krd_3y, krd_5y: bond.krd_5y, krd_7y: bond.krd_7y, krd_10y: bond.krd_10y,
+        };
+        newBondsMap.set(bond.isin, { notional: bond.notional, staticData });
+    });
+
+    // Apply trades
+    tradesToApply.forEach(trade => {
+        let existing = newBondsMap.get(trade.isin);
+        
+        if (!existing) {
+            const masterData = bondMasterData[trade.isin];
+            if (masterData) {
+                existing = { notional: 0, staticData: masterData };
+            } else {
+                 console.warn(`Cannot apply trade for ISIN ${trade.isin}: Bond master data not found.`);
+                 return;
+            }
+        }
+        
+        const newNotional = trade.action === 'BUY'
+            ? existing.notional + trade.notional
+            : existing.notional - trade.notional;
+        
+        if (newNotional > 1) { // Use a small threshold to avoid floating point issues
+            newBondsMap.set(trade.isin, { ...existing, notional: newNotional });
+        } else {
+            newBondsMap.delete(trade.isin);
+        }
+    });
+
+    // Convert map back to Bond array
+    const bondsArray: Bond[] = Array.from(newBondsMap.entries()).map(([isin, {notional, staticData}]) => {
+        const marketValue = notional * (staticData.price / 100);
+        return {
+            ...staticData,
+            isin,
+            notional,
+            marketValue,
+            portfolioWeight: 0,
+            durationContribution: 0,
+        }
+    });
+    
+    // The calculatePortfolioMetrics function will correctly recalculate weights and contributions
+    return bondsArray;
+}
