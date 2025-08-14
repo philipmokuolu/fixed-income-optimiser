@@ -116,7 +116,7 @@ export interface OptimizationResult {
   estimatedFeeCost: number;
   estimatedSpreadCost: number;
   estimatedCostBpsOfNav: number; // Cost as bps of total portfolio value
-  estimatedCostBpsPerTradeSum: number; // Sum of per-trade bps costs
+  aggregateFeeBps: number; // Sum of per-trade bps costs (e.g., 2 trades * 20 bps = 40)
   rationale?: string;
 }
 

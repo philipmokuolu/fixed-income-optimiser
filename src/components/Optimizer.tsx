@@ -4,12 +4,19 @@ import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStati
 import { Card } from '@/components/shared/Card';
 import * as optimizerService from '@/services/optimizerService';
 import { formatNumber, formatCurrency, formatCurrencyM } from '@/utils/formatting';
-import { calculatePortfolioMetrics, applyTradesToPortfolio } from '@/services/portfolioService';
+import { calculatePortfolioMetrics, applyTradesToPortfolio, calculateTrackingError } from '@/services/portfolioService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Sector } from 'recharts';
 
 
-const CREDIT_RATINGS = ['AAA', 'AA+', 'AA', 'AA-', 'A+', 'A', 'A-', 'BBB+', 'BBB', 'BBB-', 'BB+', 'BB', 'BB-', 'B+', 'B', 'B-', 'CCC+', 'CCC', 'CCC-', 'CC', 'C', 'D'];
-const RATING_ORDER = CREDIT_RATINGS.reduce((acc, rating, index) => ({ ...acc, [rating]: index }), {} as Record<string, number>);
+const ALL_RATINGS_ORDERED = ['AAA', 'AA+', 'AA', 'AA-', 'A+', 'A', 'A-', 'BBB+', 'BBB', 'BBB-', 'BB+', 'BB', 'BB-', 'B+', 'B', 'B-', 'CCC+', 'CCC', 'CCC-', 'CC', 'C', 'D', 'N/A'];
+const RATING_ORDER_MAP = ALL_RATINGS_ORDERED.reduce((acc, rating, index) => ({ ...acc, [rating]: index }), {} as Record<string, number>);
+const CONSOLIDATED_RATING_ORDER = ['AAA', 'AA', 'A', 'BBB', 'BB', 'B', 'CCC', 'CC', 'C', 'D', 'N/A'].reduce((acc, rating, index) => ({ ...acc, [rating]: index }), {} as Record<string, number>);
+
+const getConsolidatedRating = (rating: string): string => {
+    if (!rating || rating === 'N/A') return 'N/A';
+    const match = rating.match(/^(AAA|AA|A|BBB|BB|B|CCC|CC|C|D)/);
+    return match ? match[0] : 'N/A';
+};
 
 const ChartTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -27,17 +34,79 @@ const ChartTooltip = ({ active, payload, label }: any) => {
     return null;
 };
 
-// Helper to aggregate portfolio bond values by credit rating
-const calculateCreditRatingSplit = (bonds: Bond[]): Record<string, number> => {
-    return bonds.reduce((acc, bond) => {
-      const rating = bond.creditRating;
-      if (!acc[rating]) {
-        acc[rating] = 0;
-      }
-      acc[rating] += bond.marketValue;
+// --- START: HIERARCHICAL RATING LOGIC ---
+interface GranularRatingData {
+    rating: string;
+    prePercent: number;
+    postPercent: number;
+    changePercent: number;
+}
+interface ConsolidatedRatingData extends GranularRatingData {
+    children: GranularRatingData[];
+    hasChildren: boolean;
+}
+const calculateHierarchicalRatingSplit = (
+    preBonds: Bond[],
+    postBonds: Bond[],
+    preTotal: number,
+    postTotal: number
+): ConsolidatedRatingData[] => {
+    const preGranular = preBonds.reduce((acc, bond) => {
+      const rating = bond.creditRating || 'N/A';
+      acc[rating] = (acc[rating] || 0) + bond.marketValue;
       return acc;
     }, {} as Record<string, number>);
-  };
+
+    const postGranular = postBonds.reduce((acc, bond) => {
+        const rating = bond.creditRating || 'N/A';
+        acc[rating] = (acc[rating] || 0) + bond.marketValue;
+        return acc;
+    }, {} as Record<string, number>);
+
+    const allGranularRatings = new Set([...Object.keys(preGranular), ...Object.keys(postGranular)]);
+    
+    const granularData: Record<string, GranularRatingData> = {};
+    allGranularRatings.forEach(rating => {
+        const preValue = preGranular[rating] || 0;
+        const postValue = postGranular[rating] || 0;
+        const prePercent = preTotal > 0 ? (preValue / preTotal) * 100 : 0;
+        const postPercent = postTotal > 0 ? (postValue / postTotal) * 100 : 0;
+        granularData[rating] = { rating, prePercent, postPercent, changePercent: postPercent - prePercent };
+    });
+
+    const consolidatedMap = new Map<string, ConsolidatedRatingData>();
+
+    Object.values(granularData).sort((a,b) => (RATING_ORDER_MAP[a.rating] ?? 99) - (RATING_ORDER_MAP[b.rating] ?? 99)).forEach(gData => {
+        const consolidatedKey = getConsolidatedRating(gData.rating);
+        if (!consolidatedMap.has(consolidatedKey)) {
+            consolidatedMap.set(consolidatedKey, {
+                rating: consolidatedKey, prePercent: 0, postPercent: 0, changePercent: 0, children: [], hasChildren: false,
+            });
+        }
+        const parent = consolidatedMap.get(consolidatedKey)!;
+        parent.children.push(gData);
+        parent.prePercent += gData.prePercent;
+        parent.postPercent += gData.postPercent;
+    });
+
+    const finalData = Array.from(consolidatedMap.values());
+    finalData.forEach(parent => {
+        parent.changePercent = parent.postPercent - parent.prePercent;
+        parent.hasChildren = parent.children.length > 1 || (parent.children.length === 1 && parent.children[0].rating !== parent.rating);
+    });
+
+    return finalData.sort((a,b) => (CONSOLIDATED_RATING_ORDER[a.rating] ?? 99) - (CONSOLIDATED_RATING_ORDER[b.rating] ?? 99));
+};
+
+const ChevronIcon: React.FC<{ expanded: boolean, visible: boolean }> = ({ expanded, visible }) => {
+    if (!visible) return <span className="inline-block w-4 h-4"></span>;
+    return (
+      <svg className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${expanded ? 'rotate-90' : 'rotate-0'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" >
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
+      </svg>
+    );
+};
+// --- END: HIERARCHICAL RATING LOGIC ---
 
 const ResultsDisplay: React.FC<{
     result: OptimizationResult;
@@ -48,7 +117,19 @@ const ResultsDisplay: React.FC<{
     benchmark: Benchmark;
     activeFeeCost: number;
     activeSpreadCost: number;
-}> = ({ result, onTradeToggle, activeTrades, initialPortfolio, afterPortfolio, benchmark, activeFeeCost, activeSpreadCost }) => {
+    activeAggregateFeeBps: number;
+}> = ({ result, onTradeToggle, activeTrades, initialPortfolio, afterPortfolio, benchmark, activeFeeCost, activeSpreadCost, activeAggregateFeeBps }) => {
+    
+    const [expandedRatings, setExpandedRatings] = useState<Set<string>>(new Set());
+
+    const handleToggleExpand = (rating: string) => {
+        setExpandedRatings(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(rating)) newSet.delete(rating);
+            else newSet.add(rating);
+            return newSet;
+        });
+    };
 
     const postTradeKrdData = useMemo(() => {
         return KRD_TENORS.map(tenor => {
@@ -72,28 +153,13 @@ const ResultsDisplay: React.FC<{
     }, [afterPortfolio]);
 
     const ratingData = useMemo(() => {
-        if (!result) return null;
-        
-        const preTradeRatings = calculateCreditRatingSplit(initialPortfolio.bonds);
-        const postTradeRatings = calculateCreditRatingSplit(afterPortfolio.bonds);
-        const preTotal = initialPortfolio.totalMarketValue;
-        const postTotal = afterPortfolio.totalMarketValue;
-    
-        const allRatings = new Set([...Object.keys(preTradeRatings), ...Object.keys(postTradeRatings)]);
-        const sortedRatings = Array.from(allRatings).sort((a,b) => (RATING_ORDER[a] || 99) - (RATING_ORDER[b] || 99));
-    
-        return sortedRatings.map(rating => {
-            const preValue = preTradeRatings[rating] || 0;
-            const postValue = postTradeRatings[rating] || 0;
-            const prePercent = preTotal > 0 ? (preValue / preTotal) * 100 : 0;
-            const postPercent = postTotal > 0 ? (postValue / postTotal) * 100 : 0;
-            return {
-                rating,
-                prePercent,
-                postPercent,
-                changePercent: postPercent - prePercent,
-            }
-        });
+        if (!result) return [];
+        return calculateHierarchicalRatingSplit(
+            initialPortfolio.bonds,
+            afterPortfolio.bonds,
+            initialPortfolio.totalMarketValue,
+            afterPortfolio.totalMarketValue
+        );
     }, [result, initialPortfolio, afterPortfolio]);
 
     const ImpactRow: React.FC<{label: string, before: number, after: number, unit: string, formatOpts?: Intl.NumberFormatOptions}> = ({label, before, after, unit, formatOpts={minimumFractionDigits: 2, maximumFractionDigits: 2}}) => {
@@ -121,7 +187,7 @@ const ResultsDisplay: React.FC<{
                 <div className="space-y-1">
                     <ImpactRow label="Modified Duration" before={result.impactAnalysis.before.modifiedDuration} after={afterPortfolio.modifiedDuration} unit=" yrs" />
                     <ImpactRow label="Duration Gap" before={result.impactAnalysis.before.durationGap} after={afterPortfolio.modifiedDuration - benchmark.modifiedDuration} unit=" yrs" />
-                    <ImpactRow label="Tracking Error" before={result.impactAnalysis.before.trackingError} after={optimizerService.calculateTrackingError(afterPortfolio, benchmark)} unit=" bps" />
+                    <ImpactRow label="Tracking Error" before={result.impactAnalysis.before.trackingError} after={calculateTrackingError(afterPortfolio, benchmark)} unit=" bps" />
                     <ImpactRow label="Portfolio Yield" before={result.impactAnalysis.before.yield} after={afterPortfolio.averageYield} unit=" %" />
                 </div>
             </div>
@@ -150,7 +216,7 @@ const ResultsDisplay: React.FC<{
                                         <td className={`px-2 py-2 text-sm font-semibold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
                                         <td className="px-2 py-2 text-sm font-mono text-orange-400">{trade.isin}</td>
                                         <td className="px-2 py-2 text-sm max-w-xs truncate">{trade.name}</td>
-                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.notional, {maximumFractionDigits: 0})}</td>
+                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.notional, 0, 0)}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.yieldToMaturity, {minimumFractionDigits: 2})}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.marketValue, 0, 0)}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.spreadCost, 2, 2)}</td>
@@ -171,7 +237,7 @@ const ResultsDisplay: React.FC<{
 
             <div>
                 <h3 className="text-lg font-semibold text-slate-200 mb-2">Cost-Benefit Summary</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-center">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
                     <div className="bg-slate-800/50 p-3 rounded-md">
                         <h4 className="text-xs font-medium text-slate-400 uppercase">Total Cost ($)</h4>
                         <p className="text-xl font-mono font-bold text-amber-400 mt-1">{formatCurrency(activeFeeCost + activeSpreadCost, 2, 2)}</p>
@@ -180,6 +246,10 @@ const ResultsDisplay: React.FC<{
                     <div className="bg-slate-800/50 p-3 rounded-md">
                         <h4 className="text-xs font-medium text-slate-400 uppercase">Cost (bps of NAV)</h4>
                         <p className="text-xl font-mono font-bold text-amber-400 mt-1">{formatNumber(((activeFeeCost + activeSpreadCost) / initialPortfolio.totalMarketValue) * 10000, {minimumFractionDigits: 2})}</p>
+                    </div>
+                    <div className="bg-slate-800/50 p-3 rounded-md">
+                        <h4 className="text-xs font-medium text-slate-400 uppercase">Aggregate Fee (bps)</h4>
+                        <p className="text-xl font-mono font-bold text-amber-400 mt-1">{formatNumber(activeAggregateFeeBps, {minimumFractionDigits:0})}</p>
                     </div>
                 </div>
             </div>
@@ -224,13 +294,37 @@ const ResultsDisplay: React.FC<{
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-800">
-                                    {ratingData?.map(({ rating, prePercent, postPercent, changePercent }) => (
-                                        <tr key={rating} className="hover:bg-slate-800/50">
-                                            <td className="px-3 py-2 text-sm font-semibold">{rating}</td>
-                                            <td className="px-3 py-2 text-right text-sm font-mono">{formatNumber(prePercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
-                                            <td className="px-3 py-2 text-right text-sm font-mono">{formatNumber(postPercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
-                                            <td className={`px-3 py-2 text-right text-sm font-mono ${changePercent === 0 ? 'text-slate-400' : changePercent > 0 ? 'text-green-400' : 'text-red-400'}`}>{changePercent > 0 ? '+' : ''}{formatNumber(changePercent, {minimumFractionDigits: 3, maximumFractionDigits: 3})}%</td>
-                                        </tr>
+                                    {ratingData?.map((consolidated) => (
+                                        <React.Fragment key={consolidated.rating}>
+                                            <tr 
+                                                className={`hover:bg-slate-800/50 ${consolidated.hasChildren ? 'cursor-pointer' : ''}`}
+                                                onClick={() => consolidated.hasChildren && handleToggleExpand(consolidated.rating)}
+                                            >
+                                                <td className="px-3 py-2 text-sm font-semibold">
+                                                    <div className="flex items-center space-x-2">
+                                                        <ChevronIcon expanded={expandedRatings.has(consolidated.rating)} visible={consolidated.hasChildren} />
+                                                        <span>{consolidated.rating}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-3 py-2 text-right text-sm font-mono">{formatNumber(consolidated.prePercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
+                                                <td className="px-3 py-2 text-right text-sm font-mono">{formatNumber(consolidated.postPercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
+                                                <td className={`px-3 py-2 text-right text-sm font-mono ${consolidated.changePercent === 0 ? 'text-slate-400' : consolidated.changePercent > 0 ? 'text-green-400' : 'text-red-400'}`}>{consolidated.changePercent > 0 ? '+' : ''}{formatNumber(consolidated.changePercent, {minimumFractionDigits: 3, maximumFractionDigits: 3})}%</td>
+                                            </tr>
+                                            {consolidated.hasChildren && expandedRatings.has(consolidated.rating) && (
+                                                consolidated.children.map(granular => (
+                                                    <tr key={granular.rating} className="bg-slate-950 hover:bg-slate-800/50">
+                                                        <td className="px-3 py-2 text-sm">
+                                                             <div className="flex items-center pl-8">
+                                                                <span className="text-slate-300">{granular.rating}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-3 py-2 text-right text-sm font-mono text-slate-400">{formatNumber(granular.prePercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
+                                                        <td className="px-3 py-2 text-right text-sm font-mono text-slate-400">{formatNumber(granular.postPercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
+                                                        <td className={`px-3 py-2 text-right text-sm font-mono ${granular.changePercent === 0 ? 'text-slate-400' : granular.changePercent > 0 ? 'text-green-400' : 'text-red-400'}`}>{granular.changePercent > 0 ? '+' : ''}{formatNumber(granular.changePercent, {minimumFractionDigits: 3, maximumFractionDigits: 3})}%</td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </React.Fragment>
                                     ))}
                                 </tbody>
                             </table>
@@ -364,7 +458,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                 result,
                 afterPortfolio: result.impactAnalysis.before.portfolio,
                 activeFeeCost: 0,
-                activeSpreadCost: 0
+                activeSpreadCost: 0,
+                activeAggregateFeeBps: 0
             }
         }
         
@@ -374,12 +469,14 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         const activeTradedValue = activeProposedTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
         const activeFeeCost = activeTradedValue * (Number(transactionCost) / 10000);
         const activeSpreadCost = activeProposedTrades.reduce((sum, trade) => sum + trade.spreadCost, 0);
+        const activeAggregateFeeBps = activeProposedTrades.length * Number(transactionCost);
         
         return {
             result,
             afterPortfolio,
             activeFeeCost,
-            activeSpreadCost
+            activeSpreadCost,
+            activeAggregateFeeBps
         }
     }, [result, activeTrades, portfolio, bondMasterData, transactionCost]);
 
@@ -422,7 +519,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                              <div>
                                 <label htmlFor="minRating" className="block text-sm font-medium text-slate-300">Minimum Purchase Rating</label>
                                 <select id="minRating" value={minimumPurchaseRating} onChange={e => setMinimumPurchaseRating(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
-                                    {CREDIT_RATINGS.map(r => <option key={r} value={r}>{r}</option>)}
+                                    {ALL_RATINGS_ORDERED.map(r => r !== 'N/A' && <option key={r} value={r}>{r}</option>)}
                                 </select>
                                 <p className="text-xs text-slate-500 mt-1">Sets the minimum credit quality for any proposed buys.</p>
                             </div>
@@ -501,6 +598,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                         benchmark={benchmark}
                                         activeFeeCost={displayedResult.activeFeeCost}
                                         activeSpreadCost={displayedResult.activeSpreadCost}
+                                        activeAggregateFeeBps={displayedResult.activeAggregateFeeBps}
                                    />
                                 </Card>
                             </motion.div>
