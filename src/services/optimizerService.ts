@@ -111,10 +111,9 @@ export const runOptimizer = (
                 return false;
             }
             return true;
-        })
-        .sort((a, b) => a.modifiedDuration - b.modifiedDuration); // Sorted low to high duration
+        });
     
-    let eligibleToSell = initialPortfolio.bonds.filter(b => !params.excludedBonds.includes(b.isin)).sort((a, b) => a.modifiedDuration - b.modifiedDuration);
+    let eligibleToSell = initialPortfolio.bonds.filter(b => !params.excludedBonds.includes(b.isin));
     
     const checkYieldConstraint = (tempPortfolio: Portfolio, currentAvgYield: number): boolean => {
         const targetYield = minimumYield || 0;
@@ -193,53 +192,56 @@ export const runOptimizer = (
     else if (mode === 'buy-only') {
         const cashToInvest = (maxTurnover / 100) * initialPortfolio.totalMarketValue;
         let cashSpent = 0;
-        let durationGap = beforeMetrics.durationGap;
         let iterations = 0;
         
         // PHASE 1 (Buy-Only): Correct Duration Gap
         while (
-            (durationGap < -maxDurationShortfall || durationGap > maxDurationSurplus) &&
+            (currentPortfolio.modifiedDuration - benchmark.modifiedDuration < -maxDurationShortfall || currentPortfolio.modifiedDuration - benchmark.modifiedDuration > maxDurationSurplus) &&
             cashSpent < cashToInvest &&
             iterations < MAX_ITERATIONS &&
             buyUniverse.length > 0
         ) {
+            const durationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
             const isPortfolioShort = durationGap < -maxDurationShortfall; // Needs more duration
             
-            const bondToBuy = isPortfolioShort 
-                ? buyUniverse[buyUniverse.length - 1] // buy highest duration
-                : buyUniverse[0]; // buy lowest duration
+            let bestBuy: { trade: ProposedTrade, bond: (Bond & {isin: string}), score: number } | null = null;
+            
+            // Search for the best valid buy
+            for (const bondToBuy of buyUniverse) {
+                if (isPortfolioShort && bondToBuy.modifiedDuration < currentPortfolio.modifiedDuration) continue;
+                if (!isPortfolioShort && bondToBuy.modifiedDuration > currentPortfolio.modifiedDuration) continue;
+                
+                const tradeAmount = Math.min(cashToInvest / 10, cashToInvest - cashSpent);
+                if(tradeAmount < MIN_TRADE_SIZE) continue;
+                
+                const buyTrade = createTradeObject('BUY', bondToBuy, tradeAmount, iterations);
+                const tempBonds = applyTradesToPortfolio(currentBonds, [buyTrade], bondMasterData);
+                const tempPortfolio = calculatePortfolioMetrics(tempBonds);
 
-            if (!isPortfolioShort && bondToBuy.modifiedDuration > currentPortfolio.modifiedDuration) {
-                rationaleSteps.push(`Halted duration correction: Lowest duration bond available (${bondToBuy.modifiedDuration.toFixed(2)}) is still higher than the portfolio's average (${currentPortfolio.modifiedDuration.toFixed(2)}), so buying it would worsen the gap.`);
+                if (checkYieldConstraint(tempPortfolio, currentPortfolio.averageYield)) {
+                    const newGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
+                    const improvement = Math.abs(durationGap) - Math.abs(newGap);
+                    if (improvement > 0 && (bestBuy === null || improvement > bestBuy.score)) {
+                        bestBuy = { trade: buyTrade, bond: bondToBuy, score: improvement };
+                    }
+                }
+            }
+            
+            // Execute or break
+            if (bestBuy) {
+                 proposedTrades.push(bestBuy.trade);
+                 cashSpent += bestBuy.trade.marketValue;
+                 currentBonds = applyTradesToPortfolio(currentBonds, [bestBuy.trade], bondMasterData);
+                 currentPortfolio = calculatePortfolioMetrics(currentBonds);
+                 buyUniverse = buyUniverse.filter(b => b.isin !== bestBuy!.bond.isin);
+            } else {
+                rationaleSteps.push(`Halted duration correction: No available buy trade could satisfy the yield constraint while also improving the duration gap.`);
                 break;
             }
-
-            const tradeAmount = Math.min(cashToInvest / 10, cashToInvest - cashSpent); // Spend in 10% increments
-            if (tradeAmount < MIN_TRADE_SIZE) break;
-
-            const buyTrade = createTradeObject('BUY', bondToBuy, tradeAmount, iterations);
-
-            // Check yield constraint before applying
-            const tempBonds = applyTradesToPortfolio(currentBonds, [buyTrade], bondMasterData);
-            const tempPortfolio = calculatePortfolioMetrics(tempBonds);
-            if (!checkYieldConstraint(tempPortfolio, currentPortfolio.averageYield)) {
-                rationaleSteps.push(`Skipped buying ${bondToBuy.isin} as it would not meet yield objective.`);
-                buyUniverse = buyUniverse.filter(b => b.isin !== bondToBuy.isin); // don't try this bond again
-                continue;
-            }
-
-            proposedTrades.push(buyTrade);
-            cashSpent += tradeAmount;
-            
-            currentBonds = tempBonds;
-            currentPortfolio = tempPortfolio;
-            durationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
-
-            buyUniverse = buyUniverse.filter(b => b.isin !== bondToBuy.isin);
             iterations++;
         }
         
-        if (iterations > 0) rationaleSteps.push(`Phase 1: Deployed ${formatCurrency(cashSpent,0,0)} of new capital to adjust duration gap from ${beforeMetrics.durationGap.toFixed(2)} to ${durationGap.toFixed(2)} yrs.`);
+        if (iterations > 0) rationaleSteps.push(`Phase 1: Deployed ${formatCurrency(cashSpent,0,0)} of new capital to adjust duration gap from ${beforeMetrics.durationGap.toFixed(2)} to ${(currentPortfolio.modifiedDuration - benchmark.modifiedDuration).toFixed(2)} yrs.`);
 
         // PHASE 2 (Buy-Only): Minimize Tracking Error with remaining cash
         const cashRemaining = cashToInvest - cashSpent;
@@ -294,52 +296,63 @@ export const runOptimizer = (
         let totalTradedValue = 0;
         const maxTradeValue = (maxTurnover / 100) * initialPortfolio.totalMarketValue;
         const tradeSizeIncrement = maxTradeValue / 10; // Make 10 small trades up to max turnover
-        
-        let durationGap = beforeMetrics.durationGap;
         let iterations = 0;
 
         // PHASE 1 (Switch): Correct Duration Gap
         while (
-            (durationGap < -maxDurationShortfall || durationGap > maxDurationSurplus) &&
+            (currentPortfolio.modifiedDuration - benchmark.modifiedDuration < -maxDurationShortfall || currentPortfolio.modifiedDuration - benchmark.modifiedDuration > maxDurationSurplus) &&
             totalTradedValue < maxTradeValue &&
             iterations < MAX_ITERATIONS &&
             eligibleToSell.length > 0 && buyUniverse.length > 0
         ) {
+            const durationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
             const isPortfolioShort = durationGap < -maxDurationShortfall;
-            const bondToSell = isPortfolioShort ? eligibleToSell[0] : eligibleToSell[eligibleToSell.length - 1];
-            const bondToBuy = isPortfolioShort ? buyUniverse[buyUniverse.length - 1] : buyUniverse[0];
+            
+            let bestTradePair: { sellTrade: ProposedTrade, buyTrade: ProposedTrade, sellBond: Bond, buyBond: (Bond & {isin: string}), score: number } | null = null;
+            
+            // Search for the best valid pair
+            for (const bondToSell of eligibleToSell) {
+                if (isPortfolioShort && bondToSell.modifiedDuration > currentPortfolio.modifiedDuration) continue;
+                if (!isPortfolioShort && bondToSell.modifiedDuration < currentPortfolio.modifiedDuration) continue;
+                
+                for (const bondToBuy of buyUniverse) {
+                    if (isPortfolioShort && bondToBuy.modifiedDuration < bondToSell.modifiedDuration) continue;
+                    if (!isPortfolioShort && bondToBuy.modifiedDuration > bondToSell.modifiedDuration) continue;
 
-            if (!bondToSell || !bondToBuy) { rationaleSteps.push("Halted duration correction: no suitable buy/sell pair found."); break; }
-            
-            const tradeAmount = Math.min(tradeSizeIncrement, maxTradeValue - totalTradedValue, bondToSell.marketValue);
-            if (tradeAmount < MIN_TRADE_SIZE) { rationaleSteps.push("Halted: next trade size below minimum."); break; }
-            
-            const sellTrade = createTradeObject('SELL', bondToSell, tradeAmount, iterations);
-            const buyTrade = createTradeObject('BUY', bondToBuy, tradeAmount, iterations);
-            
-            const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData);
-            const tempPortfolio = calculatePortfolioMetrics(tempBonds);
+                    const tradeAmount = Math.min(tradeSizeIncrement, maxTradeValue - totalTradedValue, bondToSell.marketValue);
+                    if (tradeAmount < MIN_TRADE_SIZE) continue;
 
-            if (!checkYieldConstraint(tempPortfolio, currentPortfolio.averageYield)) {
-                rationaleSteps.push(`Skipped trade pair ${bondToSell.isin}/${bondToBuy.isin} as it would not meet yield objective.`);
-                buyUniverse = buyUniverse.filter(b => b.isin !== bondToBuy.isin); // Invalidate this buy bond for now
-                eligibleToSell = eligibleToSell.filter(b => b.isin !== bondToSell.isin); // Try a different sell bond
-                continue; // try another pair
+                    const sellTrade = createTradeObject('SELL', bondToSell, tradeAmount, iterations);
+                    const buyTrade = createTradeObject('BUY', bondToBuy, tradeAmount, iterations);
+                    const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData);
+                    const tempPortfolio = calculatePortfolioMetrics(tempBonds);
+
+                    if (checkYieldConstraint(tempPortfolio, currentPortfolio.averageYield)) {
+                        const newGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
+                        const improvement = Math.abs(durationGap) - Math.abs(newGap);
+                        if (improvement > 0 && (bestTradePair === null || improvement > bestTradePair.score)) {
+                            bestTradePair = { sellTrade, buyTrade, sellBond: bondToSell, buyBond: bondToBuy, score: improvement };
+                        }
+                    }
+                }
             }
             
-            proposedTrades.push(sellTrade, buyTrade);
-            totalTradedValue += tradeAmount; // In switch mode, turnover is one-sided
-            
-            currentBonds = tempBonds;
-            currentPortfolio = tempPortfolio;
-            durationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
-
-            eligibleToSell = eligibleToSell.filter(b => b.isin !== bondToSell.isin);
-            buyUniverse = buyUniverse.filter(b => b.isin !== bondToBuy.isin);
+            // Execute or break
+            if (bestTradePair) {
+                proposedTrades.push(bestTradePair.sellTrade, bestTradePair.buyTrade);
+                totalTradedValue += bestTradePair.sellTrade.marketValue;
+                currentBonds = applyTradesToPortfolio(currentBonds, [bestTradePair.sellTrade, bestTradePair.buyTrade], bondMasterData);
+                currentPortfolio = calculatePortfolioMetrics(currentBonds);
+                eligibleToSell = eligibleToSell.filter(b => b.isin !== bestTradePair!.sellBond.isin);
+                buyUniverse = buyUniverse.filter(b => b.isin !== bestTradePair!.buyBond.isin);
+            } else {
+                 rationaleSteps.push(`Halted duration correction: No available trade pair could satisfy the yield constraint while also improving the duration gap.`);
+                 break;
+            }
             iterations++;
         }
         
-        if (iterations > 0) rationaleSteps.push(`Phase 1: Corrected duration gap from ${beforeMetrics.durationGap.toFixed(2)} to ${durationGap.toFixed(2)} yrs.`);
+        if (iterations > 0) rationaleSteps.push(`Phase 1: Corrected duration gap from ${beforeMetrics.durationGap.toFixed(2)} to ${(currentPortfolio.modifiedDuration - benchmark.modifiedDuration).toFixed(2)} yrs.`);
 
         // PHASE 2 (Switch): Minimize Tracking Error
         let teIterations = 0;
