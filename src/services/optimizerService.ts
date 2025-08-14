@@ -94,8 +94,6 @@ export const runOptimizer = (
             return bondRatingValue <= minRatingValue;
         });
     
-    let eligibleToSell = initialPortfolio.bonds.filter(b => !params.excludedBonds.includes(b.isin));
-
     const emptyResult = (rationale: string) => ({
         proposedTrades: [],
         impactAnalysis: { before: beforeMetrics, after: beforeMetrics },
@@ -126,6 +124,12 @@ export const runOptimizer = (
                 break;
             }
 
+            const sellableBonds = currentBonds.filter(b => !params.excludedBonds.includes(b.isin));
+            if (sellableBonds.length === 0 || buyUniverse.length === 0) {
+                rationaleSteps.push("Halted: No eligible bonds available to sell or buy.");
+                break;
+            }
+
             // Define goal and sort candidates
             let sellCandidates: Bond[];
             let buyCandidates: (Bond & {isin: string})[];
@@ -133,7 +137,7 @@ export const runOptimizer = (
             if (isDurationGapBreached) {
                 rationaleSteps.push(`Goal: Fix duration gap of ${currentDurationGap.toFixed(2)} yrs.`);
                 const isPortfolioShort = currentDurationGap < 0;
-                sellCandidates = [...eligibleToSell].sort((a,b) => isPortfolioShort ? b.modifiedDuration - a.modifiedDuration : a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
+                sellCandidates = [...sellableBonds].sort((a,b) => isPortfolioShort ? b.modifiedDuration - a.modifiedDuration : a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
                 buyCandidates = [...buyUniverse].sort((a,b) => isPortfolioShort ? b.modifiedDuration - a.modifiedDuration : a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
             } else {
                 const krdGaps = KRD_TENORS.map(t => ({ tenor: t, gap: currentPortfolio[`krd_${t}`] - benchmark[`krd_${t}`] })).sort((a,b) => Math.abs(b.gap) - Math.abs(a.gap));
@@ -141,12 +145,12 @@ export const runOptimizer = (
                 rationaleSteps.push(`Goal: Reduce tracking error by targeting the ${largestGap.tenor} KRD gap.`);
                 const krdKeyToFix: KrdKey = `krd_${largestGap.tenor}`;
                 const isKrdShort = largestGap.gap < 0;
-                sellCandidates = [...eligibleToSell].sort((a,b) => isKrdShort ? a[krdKeyToFix] - b[krdKeyToFix] : b[krdKeyToFix] - a[krdKeyToFix]).slice(0, TOP_N_CANDIDATES);
+                sellCandidates = [...sellableBonds].sort((a,b) => isKrdShort ? a[krdKeyToFix] - b[krdKeyToFix] : b[krdKeyToFix] - a[krdKeyToFix]).slice(0, TOP_N_CANDIDATES);
                 buyCandidates = [...buyUniverse].sort((a,b) => isKrdShort ? b[krdKeyToFix] - a[krdKeyToFix] : a[krdKeyToFix] - b[krdKeyToFix]).slice(0, TOP_N_CANDIDATES);
             }
 
             // Find best trade pair using scoring
-            let bestPair: { sell: ProposedTrade, buy: ProposedTrade, afterPortfolio: Portfolio, score: number } | null = null;
+            let bestPair: { sell: ProposedTrade, buy: ProposedTrade, score: number } | null = null;
 
             for (const sellBond of sellCandidates) {
                 for (const buyBond of buyCandidates) {
@@ -166,21 +170,24 @@ export const runOptimizer = (
                     const teImprovement = currentTE - newTE;
                     const yieldDrop = Math.max(0, currentPortfolio.averageYield - tempPortfolio.averageYield); // Only penalize drops
                     
-                    const score = (100 * durGapImprovement) + (2 * teImprovement) - (50 * yieldDrop);
+                    // Balanced scoring: TE improvement is valuable, duration gap is critical, yield drop is a cost.
+                    const score = (50 * durGapImprovement) + (2 * teImprovement) - (100 * yieldDrop);
 
                     if (bestPair === null || score > bestPair.score) {
-                        bestPair = { sell: sellTrade, buy: buyTrade, afterPortfolio: tempPortfolio, score };
+                        bestPair = { sell: sellTrade, buy: buyTrade, score };
                     }
                 }
             }
 
             if (bestPair && bestPair.score > 0) {
-                proposedTrades.push(bestPair.sell, bestPair.buy);
+                const tradesForThisStep = [bestPair.sell, bestPair.buy];
                 totalTradedValue += bestPair.sell.marketValue;
-                currentPortfolio = bestPair.afterPortfolio;
-                currentBonds = [...currentPortfolio.bonds];
+                proposedTrades.push(...tradesForThisStep);
                 
-                eligibleToSell = eligibleToSell.filter(b => b.isin !== bestPair!.sell.isin);
+                const newBonds = applyTradesToPortfolio(currentBonds, tradesForThisStep, bondMasterData);
+                currentPortfolio = calculatePortfolioMetrics(newBonds);
+                currentBonds = currentPortfolio.bonds;
+                
                 buyUniverse = buyUniverse.filter(b => b.isin !== bestPair!.buy.isin);
                 pairIdCounter++;
             } else {
@@ -196,11 +203,17 @@ export const runOptimizer = (
         let iterations = 0;
         rationaleSteps.push(`Goal: Raise ${formatCurrency(cashToRaise, 0, 0)} cash while minimizing risk.`);
 
-        while(cashRaised < cashToRaise && iterations < MAX_ITERATIONS && eligibleToSell.length > 0) {
-            let bestSale: { trade: ProposedTrade, afterPortfolio: Portfolio, score: number } | null = null;
+        while(cashRaised < cashToRaise && iterations < MAX_ITERATIONS && currentBonds.length > 0) {
+            let bestSale: { trade: ProposedTrade, score: number } | null = null;
             
+            const sellableBonds = currentBonds.filter(b => !params.excludedBonds.includes(b.isin));
+            if (sellableBonds.length === 0) {
+                rationaleSteps.push("Halted: No remaining eligible bonds to sell.");
+                break;
+            }
+
             // Prioritize selling bonds with lowest duration impact first
-            const sellCandidates = [...eligibleToSell].sort((a,b) => a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
+            const sellCandidates = [...sellableBonds].sort((a,b) => a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
 
             for (const bondToSell of sellCandidates) {
                 const tradeAmount = Math.min(bondToSell.marketValue, cashToRaise - cashRaised, cashToRaise/5);
@@ -213,21 +226,22 @@ export const runOptimizer = (
                 const teIncrease = calculateTrackingError(tempPortfolio, benchmark) - calculateTrackingError(currentPortfolio, benchmark);
                 const yieldDrop = Math.max(0, currentPortfolio.averageYield - tempPortfolio.averageYield);
                 
-                // Score seeks to minimize damage (lower score is better)
-                const score = (2 * teIncrease) + (50 * yieldDrop);
+                // Score seeks to minimize damage (closer to zero is better). This is a cost function.
+                const score = (2 * teIncrease) + (100 * yieldDrop);
                 
                 if(bestSale === null || score < bestSale.score) {
-                    bestSale = { trade: sellTrade, afterPortfolio: tempPortfolio, score };
+                    bestSale = { trade: sellTrade, score };
                 }
             }
 
             if(bestSale) {
                 proposedTrades.push(bestSale.trade);
                 cashRaised += bestSale.trade.marketValue;
-                currentPortfolio = bestSale.afterPortfolio;
-                currentBonds = [...currentPortfolio.bonds];
+                
+                const newBonds = applyTradesToPortfolio(currentBonds, [bestSale.trade], bondMasterData);
+                currentPortfolio = calculatePortfolioMetrics(newBonds);
+                currentBonds = currentPortfolio.bonds;
 
-                eligibleToSell = eligibleToSell.filter(b => b.isin !== bestSale!.trade.isin);
                 pairIdCounter++;
             } else {
                  rationaleSteps.push("Halted: No further sales possible without negatively impacting risk/yield profile.");
@@ -261,7 +275,7 @@ export const runOptimizer = (
                  buyCandidates = [...buyUniverse].sort((a,b) => isKrdShort ? b[krdKeyToFix] - a[krdKeyToFix] : a[krdKeyToFix] - b[krdKeyToFix]).slice(0, TOP_N_CANDIDATES);
             }
             
-            let bestBuy: { trade: ProposedTrade, afterPortfolio: Portfolio, score: number } | null = null;
+            let bestBuy: { trade: ProposedTrade, score: number } | null = null;
             for(const bondToBuy of buyCandidates) {
                 const tradeAmount = Math.min(tradeSizeIncrement, cashToInvest - cashSpent);
                 if (tradeAmount < MIN_TRADE_SIZE) continue;
@@ -277,18 +291,20 @@ export const runOptimizer = (
                 const teImprovement = currentTE - newTE;
                 const yieldDrop = Math.max(0, currentPortfolio.averageYield - tempPortfolio.averageYield);
                 
-                const score = (100 * durGapImprovement) + (2 * teImprovement) - (50 * yieldDrop);
+                const score = (50 * durGapImprovement) + (2 * teImprovement) - (100 * yieldDrop);
                 
                 if(bestBuy === null || score > bestBuy.score) {
-                    bestBuy = { trade: buyTrade, afterPortfolio: tempPortfolio, score };
+                    bestBuy = { trade: buyTrade, score };
                 }
             }
 
             if(bestBuy && bestBuy.score > 0) {
                 proposedTrades.push(bestBuy.trade);
                 cashSpent += bestBuy.trade.marketValue;
-                currentPortfolio = bestBuy.afterPortfolio;
-                currentBonds = [...currentPortfolio.bonds];
+
+                const newBonds = applyTradesToPortfolio(currentBonds, [bestBuy.trade], bondMasterData);
+                currentPortfolio = calculatePortfolioMetrics(newBonds);
+                currentBonds = currentPortfolio.bonds;
 
                 buyUniverse = buyUniverse.filter(b => b.isin !== bestBuy!.trade.isin);
                 pairIdCounter++;
