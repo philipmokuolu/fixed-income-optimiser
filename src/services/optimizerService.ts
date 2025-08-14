@@ -78,7 +78,19 @@ const createTradeObject = (action: 'BUY' | 'SELL', bond: Bond | (BondStaticData 
         yieldToMaturity: bond.yieldToMaturity,
         pairId,
         spreadCost,
+        creditRating: bond.creditRating,
     };
+};
+
+// Calculates how far a duration gap is from the allowed zone. Returns 0 if within limits.
+const getDurationBreachDistance = (gap: number, shortfallLimit: number, surplusLimit: number): number => {
+    if (gap < -shortfallLimit) {
+        return Math.abs(gap) - shortfallLimit;
+    }
+    if (gap > surplusLimit) {
+        return gap - surplusLimit;
+    }
+    return 0;
 };
 
 export const runOptimizer = (
@@ -133,9 +145,9 @@ export const runOptimizer = (
         while (totalTradedValue < maxTradeValue && iterations < MAX_ITERATIONS) {
             const currentDurationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
             const currentTE = calculateTrackingError(currentPortfolio, benchmark);
-            const isDurationGapBreached = currentDurationGap < -params.maxDurationShortfall || currentDurationGap > params.maxDurationSurplus;
+            const currentBreachDistance = getDurationBreachDistance(currentDurationGap, params.maxDurationShortfall, params.maxDurationSurplus);
             
-            if (!isDurationGapBreached && currentTE < 1.0) { 
+            if (currentBreachDistance === 0 && currentTE < 1.0) { 
                 rationaleSteps.push("Halted: Portfolio is within duration limits and tracking error is already minimal.");
                 break;
             }
@@ -150,7 +162,7 @@ export const runOptimizer = (
             let sellCandidates: Bond[];
             let buyCandidates: (Bond & {isin: string})[];
 
-            if (isDurationGapBreached) {
+            if (currentBreachDistance > 0) {
                 rationaleSteps.push(`Goal: Fix duration gap of ${currentDurationGap.toFixed(2)} yrs.`);
                 const isPortfolioShort = currentDurationGap < 0;
                 sellCandidates = [...sellableBonds].sort((a,b) => isPortfolioShort ? b.modifiedDuration - a.modifiedDuration : a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
@@ -181,13 +193,17 @@ export const runOptimizer = (
 
                     const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
                     const newTE = calculateTrackingError(tempPortfolio, benchmark);
-                    
-                    const durGapImprovement = Math.abs(currentDurationGap) - Math.abs(newDurGap);
+                    const newBreachDistance = getDurationBreachDistance(newDurGap, params.maxDurationShortfall, params.maxDurationSurplus);
+
+                    const breachImprovement = currentBreachDistance - newBreachDistance;
                     const teImprovement = currentTE - newTE;
-                    const yieldDrop = Math.max(0, currentPortfolio.averageYield - tempPortfolio.averageYield); // Only penalize drops
+                    const yieldPenalty = Math.max(0, currentPortfolio.averageYield - tempPortfolio.averageYield); // Only penalize drops
                     
-                    // Balanced scoring: TE improvement is valuable, duration gap is critical, yield drop is a cost.
-                    const score = (50 * durGapImprovement) + (2 * teImprovement) - (100 * yieldDrop);
+                    // Prioritized Scoring:
+                    // 1. Duration breach improvement is paramount (1000x multiplier).
+                    // 2. TE improvement is secondary but important (10x multiplier).
+                    // 3. Yield drop is a soft penalty (5x multiplier).
+                    const score = (1000 * breachImprovement) + (10 * teImprovement) - (5 * yieldPenalty);
                     
                     if (isNaN(score)) {
                         console.warn('Skipping candidate pair due to NaN score calculation. Check input data for non-numeric values in numeric columns.', { sellBond, buyBond });
@@ -285,10 +301,10 @@ export const runOptimizer = (
         while(cashSpent < cashToInvest && iterations < MAX_ITERATIONS && buyUniverse.length > 0) {
             const currentDurationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
             const currentTE = calculateTrackingError(currentPortfolio, benchmark);
-            const isDurationGapBreached = currentDurationGap < -params.maxDurationShortfall || currentDurationGap > params.maxDurationSurplus;
-            
+            const currentBreachDistance = getDurationBreachDistance(currentDurationGap, params.maxDurationShortfall, params.maxDurationSurplus);
+
             let buyCandidates: (Bond & {isin: string})[];
-            if (isDurationGapBreached) {
+            if (currentBreachDistance > 0) {
                  rationaleSteps.push(`Goal: Fix duration gap of ${currentDurationGap.toFixed(2)} yrs with new cash.`);
                 const isPortfolioShort = currentDurationGap < 0;
                 buyCandidates = [...buyUniverse].sort((a,b) => isPortfolioShort ? b.modifiedDuration - a.modifiedDuration : a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
@@ -312,12 +328,13 @@ export const runOptimizer = (
                 
                 const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
                 const newTE = calculateTrackingError(tempPortfolio, benchmark);
+                const newBreachDistance = getDurationBreachDistance(newDurGap, params.maxDurationShortfall, params.maxDurationSurplus);
                 
-                const durGapImprovement = Math.abs(currentDurationGap) - Math.abs(newDurGap);
+                const breachImprovement = currentBreachDistance - newBreachDistance;
                 const teImprovement = currentTE - newTE;
-                const yieldDrop = Math.max(0, currentPortfolio.averageYield - tempPortfolio.averageYield);
+                const yieldPenalty = Math.max(0, currentPortfolio.averageYield - tempPortfolio.averageYield);
                 
-                const score = (50 * durGapImprovement) + (2 * teImprovement) - (100 * yieldDrop);
+                const score = (1000 * breachImprovement) + (10 * teImprovement) - (5 * yieldPenalty);
                 
                 if (isNaN(score)) {
                     console.warn('Skipping candidate for purchase due to NaN score calculation.', { bondToBuy });

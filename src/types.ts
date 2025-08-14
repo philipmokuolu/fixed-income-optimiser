@@ -96,6 +96,7 @@ export interface ProposedTrade {
   yieldToMaturity: number;
   pairId: number; // To link buy/sell pairs
   spreadCost: number;
+  creditRating: string;
 }
 
 export interface ImpactMetrics {
