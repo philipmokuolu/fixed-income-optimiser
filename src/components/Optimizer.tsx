@@ -354,7 +354,6 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     // New constraints state
     const [investmentHorizonLimit, setInvestmentHorizonLimit] = useState(() => sessionStorage.getItem('optimiser_horizonLimit') || '10');
     const [minimumPurchaseRating, setMinimumPurchaseRating] = useState(() => sessionStorage.getItem('optimiser_minRating') || 'BB-');
-    const [minimumYield, setMinimumYield] = useState(() => sessionStorage.getItem('optimiser_minimumYield') || '3.0');
 
     const [result, setResult] = useState<OptimizationResult | null>(() => {
         try {
@@ -392,10 +391,6 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     }, [minimumPurchaseRating]);
     
     useEffect(() => {
-        sessionStorage.setItem('optimiser_minimumYield', minimumYield);
-    }, [minimumYield]);
-    
-    useEffect(() => {
         if (result) {
             sessionStorage.setItem('optimiser_result', JSON.stringify(result));
         } else {
@@ -421,7 +416,6 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                 mode,
                 investmentHorizonLimit: Number(investmentHorizonLimit),
                 minimumPurchaseRating: minimumPurchaseRating,
-                minimumYield: Number(minimumYield),
                 cashToRaise: mode === 'sell-only' ? Number(cashToRaise) : undefined,
             };
             const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData);
@@ -429,7 +423,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             setActiveTrades(new Set(optoResult.proposedTrades.map(t => t.pairId)));
             setIsLoading(false);
         }, 500); // simulate async work
-    }, [maxTurnover, cashToRaise, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, minimumYield, portfolio, benchmark, bondMasterData, appSettings]);
+    }, [maxTurnover, cashToRaise, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, portfolio, benchmark, bondMasterData, appSettings]);
     
     const handleResetOptimiser = () => {
         setResult(null);
@@ -522,11 +516,6 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                     {ALL_RATINGS_ORDERED.map(r => r !== 'N/A' && <option key={r} value={r}>{r}</option>)}
                                 </select>
                                 <p className="text-xs text-slate-500 mt-1">Sets the minimum credit quality for any proposed buys.</p>
-                            </div>
-                             <div>
-                                <label htmlFor="minYield" className="block text-sm font-medium text-slate-300">Minimum Portfolio Yield (%)</label>
-                                <input type="number" step="0.05" id="minYield" value={minimumYield} onChange={e => setMinimumYield(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
-                                <p className="text-xs text-slate-500 mt-1">Ensures the post-trade yield does not fall below this value.</p>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-300">Optimisation Mode</label>

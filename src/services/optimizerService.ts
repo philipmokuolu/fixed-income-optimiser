@@ -75,7 +75,7 @@ export const runOptimizer = (
     
     // --- 1. SETUP ---
     const beforeMetrics = calculateImpactMetrics(initialPortfolio, benchmark);
-    const { mode, maxTurnover, transactionCost, minimumYield = 0 } = params;
+    const { mode, maxTurnover, transactionCost } = params;
     const rationaleSteps: string[] = [];
 
     const portfolioIsins = new Set(initialPortfolio.bonds.map(b => b.isin));
@@ -102,8 +102,6 @@ export const runOptimizer = (
         estimatedCost: 0, estimatedFeeCost: 0, estimatedSpreadCost: 0, estimatedCostBpsOfNav: 0, aggregateFeeBps: 0,
         rationale,
     });
-
-    const checkYieldConstraint = (tempPortfolio: Portfolio): boolean => tempPortfolio.averageYield >= minimumYield;
 
     let currentPortfolio = { ...initialPortfolio };
     let currentBonds = [...initialPortfolio.bonds];
@@ -161,8 +159,6 @@ export const runOptimizer = (
                     const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData);
                     const tempPortfolio = calculatePortfolioMetrics(tempBonds);
 
-                    if (!checkYieldConstraint(tempPortfolio)) continue;
-
                     const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
                     const newTE = calculateTrackingError(tempPortfolio, benchmark);
                     
@@ -214,8 +210,6 @@ export const runOptimizer = (
                 const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade], bondMasterData);
                 const tempPortfolio = calculatePortfolioMetrics(tempBonds);
 
-                if (!checkYieldConstraint(tempPortfolio)) continue;
-
                 const teIncrease = calculateTrackingError(tempPortfolio, benchmark) - calculateTrackingError(currentPortfolio, benchmark);
                 const yieldDrop = Math.max(0, currentPortfolio.averageYield - tempPortfolio.averageYield);
                 
@@ -236,7 +230,7 @@ export const runOptimizer = (
                 eligibleToSell = eligibleToSell.filter(b => b.isin !== bestSale!.trade.isin);
                 pairIdCounter++;
             } else {
-                 rationaleSteps.push("Halted: No further sales possible without breaching the yield constraint.");
+                 rationaleSteps.push("Halted: No further sales possible without negatively impacting risk/yield profile.");
                  break;
             }
             iterations++;
@@ -275,8 +269,6 @@ export const runOptimizer = (
                 const buyTrade = createTradeObject('BUY', bondToBuy, tradeAmount, pairIdCounter);
                 const tempBonds = applyTradesToPortfolio(currentBonds, [buyTrade], bondMasterData);
                 const tempPortfolio = calculatePortfolioMetrics(tempBonds);
-
-                if (!checkYieldConstraint(tempPortfolio)) continue;
                 
                 const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
                 const newTE = calculateTrackingError(tempPortfolio, benchmark);
@@ -329,8 +321,4 @@ export const runOptimizer = (
         estimatedCost,
         estimatedFeeCost,
         estimatedSpreadCost,
-        estimatedCostBpsOfNav: initialPortfolio.totalMarketValue > 0 ? (estimatedCost / finalPortfolio.totalMarketValue) * 10000 : 0,
-        aggregateFeeBps: transactionCost * proposedTrades.length,
-        rationale: uniqueRationale || "Trades were proposed to improve portfolio risk characteristics.",
-    };
-};
+        estimatedCostBpsOfNav: initialPortfolio.totalMarketValue > 0 ? (estimatedCost / finalPortfolio.totalM
