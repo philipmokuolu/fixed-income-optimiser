@@ -72,7 +72,7 @@ export const runOptimizer = (
   params: OptimizationParams,
   bondMasterData: Record<string, BondStaticData>
 ): OptimizationResult => {
-    
+  try {
     // --- 1. SETUP ---
     const beforeMetrics = calculateImpactMetrics(initialPortfolio, benchmark);
     const { mode, maxTurnover, transactionCost } = params;
@@ -172,6 +172,11 @@ export const runOptimizer = (
                     
                     // Balanced scoring: TE improvement is valuable, duration gap is critical, yield drop is a cost.
                     const score = (50 * durGapImprovement) + (2 * teImprovement) - (100 * yieldDrop);
+                    
+                    if (isNaN(score)) {
+                        console.warn('Skipping candidate pair due to NaN score calculation. Check input data for non-numeric values in numeric columns.', { sellBond, buyBond });
+                        continue;
+                    }
 
                     if (bestPair === null || score > bestPair.score) {
                         bestPair = { sell: sellTrade, buy: buyTrade, score };
@@ -229,6 +234,11 @@ export const runOptimizer = (
                 // Score seeks to minimize damage (closer to zero is better). This is a cost function.
                 const score = (2 * teIncrease) + (100 * yieldDrop);
                 
+                if(isNaN(score)) {
+                    console.warn('Skipping candidate for sale due to NaN score calculation.', { bondToSell });
+                    continue;
+                }
+
                 if(bestSale === null || score < bestSale.score) {
                     bestSale = { trade: sellTrade, score };
                 }
@@ -293,6 +303,11 @@ export const runOptimizer = (
                 
                 const score = (50 * durGapImprovement) + (2 * teImprovement) - (100 * yieldDrop);
                 
+                if (isNaN(score)) {
+                    console.warn('Skipping candidate for purchase due to NaN score calculation.', { bondToBuy });
+                    continue;
+                }
+
                 if(bestBuy === null || score > bestBuy.score) {
                     bestBuy = { trade: buyTrade, score };
                 }
@@ -343,4 +358,9 @@ export const runOptimizer = (
         aggregateFeeBps,
         rationale: uniqueRationale,
     };
+  } catch (e: any) {
+    console.error("Critical error in optimizer service:", e);
+    // Re-throw a user-friendly error that the UI component can display.
+    throw new Error(`The optimization engine failed. This is often caused by invalid data (e.g., text in a numeric column) in the bond master CSV. Original error: ${e.message}`);
+  }
 };

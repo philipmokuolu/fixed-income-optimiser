@@ -362,6 +362,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         } catch (e) { return null; }
     });
     const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     
     const [activeTrades, setActiveTrades] = useState<Set<number>>(() => {
         try {
@@ -406,28 +407,46 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     const handleRunOptimiser = useCallback(() => {
         setIsLoading(true);
         setResult(null);
+        setError(null);
 
         setTimeout(() => {
-            const params: OptimizationParams = {
-                ...appSettings,
-                maxTurnover: Number(maxTurnover),
-                transactionCost: Number(transactionCost),
-                excludedBonds,
-                mode,
-                investmentHorizonLimit: Number(investmentHorizonLimit),
-                minimumPurchaseRating: minimumPurchaseRating,
-                cashToRaise: mode === 'sell-only' ? Number(cashToRaise) : undefined,
-            };
-            const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData);
-            setResult(optoResult);
-            setActiveTrades(new Set(optoResult.proposedTrades.map(t => t.pairId)));
-            setIsLoading(false);
+            try {
+                const params: OptimizationParams = {
+                    ...appSettings,
+                    maxTurnover: Number(maxTurnover),
+                    transactionCost: Number(transactionCost),
+                    excludedBonds,
+                    mode,
+                    investmentHorizonLimit: Number(investmentHorizonLimit),
+                    minimumPurchaseRating: minimumPurchaseRating,
+                    cashToRaise: mode === 'sell-only' ? Number(cashToRaise) : undefined,
+                };
+
+                if (isNaN(params.maxTurnover) || isNaN(params.transactionCost) || isNaN(params.investmentHorizonLimit) || (params.cashToRaise && isNaN(params.cashToRaise))) {
+                    throw new Error("One of the input parameters (Turnover, Cost, Horizon, Cash) is not a valid number.");
+                }
+
+                const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData);
+                
+                if (!optoResult) {
+                    throw new Error("Optimizer returned no result. This may be due to an internal calculation error.");
+                }
+
+                setResult(optoResult);
+                setActiveTrades(new Set(optoResult.proposedTrades.map(t => t.pairId)));
+            } catch (e: any) {
+                console.error("Optimization failed:", e);
+                setError(e.message || "An unexpected error occurred. Please check data files for inconsistencies or invalid numeric values.");
+            } finally {
+                setIsLoading(false);
+            }
         }, 500); // simulate async work
     }, [maxTurnover, cashToRaise, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, portfolio, benchmark, bondMasterData, appSettings]);
     
     const handleResetOptimiser = () => {
         setResult(null);
         setActiveTrades(new Set());
+        setError(null);
     };
     
     const handleTradeToggle = (pairId: number) => {
@@ -491,7 +510,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                         <div className="space-y-4">
                             <div>
                                 <label htmlFor="paramInput" className="block text-sm font-medium text-slate-300">
-                                    {mode === 'buy-only' ? 'New Cash to Invest (%)' : mode === 'sell-only' ? 'Cash to Raise ($)' : 'Max Turnover (%)'}
+                                    {mode === 'buy-only' ? 'New Cash to Invest ($)' : mode === 'sell-only' ? 'Cash to Raise ($)' : 'Max Turnover (%)'}
                                 </label>
                                 <input 
                                     type="number" 
@@ -566,6 +585,12 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                 </button>
                             )}
                         </div>
+                        {error && (
+                            <div className="mt-4 p-3 bg-red-900/50 border border-red-500/50 rounded-md text-red-300 text-sm" role="alert">
+                                <p className="font-bold">Optimization Error</p>
+                                <p>{error}</p>
+                            </div>
+                        )}
                     </Card>
                      <AnimatePresence>
                         {displayedResult && (
