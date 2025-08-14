@@ -314,6 +314,8 @@ export const runOptimizer = (
     const estimatedCost = estimatedFeeCost + estimatedSpreadCost;
 
     const uniqueRationale = [...new Set(rationaleSteps.filter(s => s.startsWith("Goal:") || s.startsWith("Halted:")))].join(' ');
+    
+    const aggregateFeeBps = proposedTrades.length * transactionCost;
 
     return {
         proposedTrades,
@@ -321,4 +323,8 @@ export const runOptimizer = (
         estimatedCost,
         estimatedFeeCost,
         estimatedSpreadCost,
-        estimatedCostBpsOfNav: initialPortfolio.totalMarketValue > 0 ? (estimatedCost / finalPortfolio.totalM
+        estimatedCostBpsOfNav: initialPortfolio.totalMarketValue > 0 ? (estimatedCost / initialPortfolio.totalMarketValue) * 10000 : 0,
+        aggregateFeeBps,
+        rationale: uniqueRationale,
+    };
+};
