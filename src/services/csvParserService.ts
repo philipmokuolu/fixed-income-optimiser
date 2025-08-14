@@ -26,13 +26,11 @@ export const parseCsvToJson = <T>(
 
             const fileHeaders = lines[0].split(',').map(h => h.trim());
             
-            // Create a map from the lowercase version of the file's headers to their original column index.
             const headerIndexMap: Record<string, number> = {};
             fileHeaders.forEach((h, index) => {
                 headerIndexMap[h.toLowerCase()] = index;
             });
 
-            // Perform a case-insensitive check for missing headers.
             const missingHeaders = expectedHeaders.filter(h => headerIndexMap[h.toLowerCase()] === undefined);
             if (missingHeaders.length > 0) {
                 return reject(new Error(`CSV is missing required headers: ${missingHeaders.join(', ')}`));
@@ -45,25 +43,24 @@ export const parseCsvToJson = <T>(
                 const values = lines[i].split(',');
                 const obj: any = {};
                 
-                // Iterate over the headers the app expects to build the object.
                 for (const expectedKey of expectedHeaders) {
-                    // Find the column index using the lowercase version of the expected key.
                     const index = headerIndexMap[expectedKey.toLowerCase()];
 
-                    // Only process if the expected header exists in the file (it should, due to the check above).
                     if (index !== undefined) { 
                         const value = values[index]?.trim() || '';
-                        const isNumericError = errorStrings.has(value.toUpperCase());
+                        const isErrorString = errorStrings.has(value.toUpperCase());
+                        const isMaturityDateColumn = expectedKey.toLowerCase() === 'maturitydate';
 
-                        if (isNumericError) {
-                            // It's a recognized error string like #N/A. Default to 0 to prevent calculation errors.
-                             obj[expectedKey] = 0;
-                        } else if (!isNaN(Number(value)) && value !== '') {
-                            // It's a valid number.
-                             obj[expectedKey] = Number(value);
+                        if (isErrorString) {
+                            // For maturity date, preserve the error string (e.g., "#N/A") as "N/A" for the parser.
+                            // For all other columns, convert to 0 to maintain existing behavior for numeric fields.
+                            obj[expectedKey] = isMaturityDateColumn ? "N/A" : 0;
+                        } else if (!isNaN(Number(value)) && value !== '' && !isMaturityDateColumn) {
+                            // It's a valid number in a column that is NOT maturityDate. Convert to number.
+                            obj[expectedKey] = Number(value);
                         } else {
-                            // It's a regular string. Use the application's expected casing for the final object key.
-                             obj[expectedKey] = value;
+                            // It's a regular string, or a value in the maturityDate column. Keep as string.
+                            obj[expectedKey] = value;
                         }
                     }
                 }

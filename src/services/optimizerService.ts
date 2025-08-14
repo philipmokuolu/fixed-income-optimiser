@@ -1,3 +1,4 @@
+
 import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, KrdKey, KRD_TENORS, Bond, ProposedTrade, BondStaticData, ImpactMetrics } from '@/types';
 import { calculatePortfolioMetrics, applyTradesToPortfolio, calculateTrackingError } from './portfolioService';
 import { formatCurrency } from '@/utils/formatting';
@@ -17,6 +18,11 @@ const RATING_SCALE: { [key: string]: number } = {
 };
 
 const parseMaturityDate = (dateStr: string): Date => {
+  if (typeof dateStr !== 'string' || !dateStr || dateStr.toUpperCase() === 'N/A') {
+    // Handle perpetuals or invalid date strings by returning a far-future date.
+    return new Date('2200-01-01');
+  }
+
   const parts = dateStr.split(/[\/-]/);
   if (parts.length === 3) {
       let year = parseInt(parts[2], 10);
@@ -34,7 +40,16 @@ const parseMaturityDate = (dateStr: string): Date => {
       }
       return new Date(year, month, day);
   }
-  return new Date(dateStr);
+  try {
+      // Fallback for standard date strings like "YYYY-MM-DD"
+      const date = new Date(dateStr);
+      if (!isNaN(date.getTime())) {
+          return date;
+      }
+  } catch(e) { /* ignore parse errors and fall through */ }
+
+  // If all else fails, treat as a perpetual.
+  return new Date('2200-01-01');
 };
 
 
@@ -81,9 +96,10 @@ export const runOptimizer = (
     const portfolioIsins = new Set(initialPortfolio.bonds.map(b => b.isin));
     
     let buyUniverse = Object.entries(bondMasterData)
-        .filter(([isin]) => !portfolioIsins.has(isin))
-        .map(([isin, staticData]) => ({ ...staticData, isin } as (Bond & {isin: string})))
+        .map(([isin, staticData]) => ({ ...staticData, isin } as (Bond & {isin: string}))) // Eagerly map to include ISIN
         .filter(bond => {
+            if (portfolioIsins.has(bond.isin)) return false; // Exclude bonds already in portfolio
+
             const today = new Date();
             const maturityDate = parseMaturityDate(bond.maturityDate);
             const yearsToMaturity = (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
