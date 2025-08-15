@@ -108,6 +108,21 @@ const ChevronIcon: React.FC<{ expanded: boolean, visible: boolean }> = ({ expand
 };
 // --- END: HIERARCHICAL RATING LOGIC ---
 
+const ImpactRow: React.FC<{label: string, before: number, after: number, unit: string, formatOpts?: Intl.NumberFormatOptions}> = ({label, before, after, unit, formatOpts={minimumFractionDigits: 2, maximumFractionDigits: 2}}) => {
+    const isImproved = (label.includes('Error') && after < before) || (label.includes('Duration Gap') && Math.abs(after) < Math.abs(before)) || (!label.includes('Error') && !label.includes('Gap') && after > before);
+    const color = after === before ? 'text-slate-300' : isImproved ? 'text-green-400' : 'text-red-400';
+    return (
+         <div className="flex justify-between items-center text-base py-2">
+            <span className="text-slate-400">{label}</span>
+            <div className="flex items-center space-x-2 font-mono">
+                <span className="text-slate-300">{formatNumber(before, formatOpts)}{unit}</span>
+                <span className="text-slate-500">→</span>
+                <span className={color}>{formatNumber(after, formatOpts)}{unit}</span>
+            </div>
+        </div>
+    )
+};
+
 const ResultsDisplay: React.FC<{
     result: OptimizationResult;
     onTradeToggle: (pairId: number) => void;
@@ -161,28 +176,13 @@ const ResultsDisplay: React.FC<{
             afterPortfolio.totalMarketValue
         );
     }, [result, initialPortfolio, afterPortfolio]);
-
-    const ImpactRow: React.FC<{label: string, before: number, after: number, unit: string, formatOpts?: Intl.NumberFormatOptions}> = ({label, before, after, unit, formatOpts={minimumFractionDigits: 2, maximumFractionDigits: 2}}) => {
-        const isImproved = (label.includes('Error') && after < before) || (label.includes('Duration Gap') && Math.abs(after) < Math.abs(before)) || (!label.includes('Error') && !label.includes('Gap') && after > before);
-        const color = after === before ? 'text-slate-300' : isImproved ? 'text-green-400' : 'text-red-400';
-        return (
-             <div className="flex justify-between items-center text-base py-2">
-                <span className="text-slate-400">{label}</span>
-                <div className="flex items-center space-x-2 font-mono">
-                    <span className="text-slate-300">{formatNumber(before, formatOpts)}{unit}</span>
-                    <span className="text-slate-500">→</span>
-                    <span className={color}>{formatNumber(after, formatOpts)}{unit}</span>
-                </div>
-            </div>
-        )
-    };
     
     const CURRENCY_COLORS = ['#f97316', '#6366f1', '#14b8a6', '#f43f5e', '#3b82f6'];
 
 
     return (
         <div className="space-y-6">
-            <div>
+            <div className="border-b-2 border-slate-800 pb-6">
                 <h3 className="text-lg font-semibold text-slate-200 mb-2">Impact Analysis (Before → After)</h3>
                 <div className="space-y-1">
                     <ImpactRow label="Modified Duration" before={result.impactAnalysis.before.modifiedDuration} after={afterPortfolio.modifiedDuration} unit=" yrs" />
@@ -227,13 +227,13 @@ const ResultsDisplay: React.FC<{
                              </tbody>
                         </table>
                      </div>
-                ) : <p className="text-sm text-slate-400">{result.rationale || 'No trades recommended.'}</p>}
+                ) : <p className="text-base text-slate-400">{result.rationale || 'No trades recommended.'}</p>}
             </div>
 
             {result.rationale && (
                  <div>
                     <h3 className="text-lg font-semibold text-slate-200 mb-2">Rationale</h3>
-                    <p className="text-base text-slate-400 bg-slate-800/50 p-4 rounded-md">{result.rationale}</p>
+                    <p className="text-base text-slate-400 bg-slate-800/50 p-4 rounded-md whitespace-pre-wrap">{result.rationale}</p>
                  </div>
             )}
 
@@ -256,84 +256,86 @@ const ResultsDisplay: React.FC<{
                 </div>
             </div>
 
-            <div className="border-t-2 border-slate-800 pt-6 mt-6">
-                <h3 className="text-xl font-semibold text-slate-100 mb-4">Post-Trade Analysis</h3>
-                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                    <Card>
-                        <h4 className="text-md font-semibold text-slate-300 mb-4 text-center">Post-Trade KRD Gap</h4>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <BarChart data={postTradeKrdData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                            <XAxis dataKey="tenor" tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }}/>
-                            <YAxis tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }}/>
-                            <Tooltip content={<ChartTooltip />} cursor={{fill: '#334155'}}/>
-                            <Bar dataKey="Active KRD" fill="#f97316" />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </Card>
-                    <Card>
-                        <h4 className="text-md font-semibold text-slate-300 mb-4 text-center">Post-Trade Currency Exposure</h4>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <PieChart>
-                                <Pie data={postTradeCurrencyData} cx="50%" cy="50%" labelLine={false} outerRadius={100} fill="#8884d8" dataKey="value" nameKey="name" label={({ name, percent }) => `${name} ${formatNumber(percent * 100, {maximumFractionDigits: 0})}%`}>
-                                    {postTradeCurrencyData.map((entry, index) => <Cell key={`cell-${index}`} fill={CURRENCY_COLORS[index % CURRENCY_COLORS.length]} />)}
-                                </Pie>
-                                <Tooltip formatter={(value: number) => formatCurrency(value, 0, 0)} />
-                                <Legend wrapperStyle={{ color: '#94a3b8' }} />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </Card>
-                     <Card className="xl:col-span-2">
-                        <h4 className="text-md font-semibold text-slate-300 mb-4 text-center">Credit Rating Distribution Change</h4>
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full divide-y divide-slate-800">
-                                <thead className="bg-slate-900/50">
-                                    <tr>
-                                        <th className="px-3 py-2 text-left text-xs font-medium text-slate-400 uppercase">Rating</th>
-                                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Pre-Trade (%)</th>
-                                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Post-Trade (%)</th>
-                                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Change (%)</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-800">
-                                    {ratingData?.map((consolidated) => (
-                                        <React.Fragment key={consolidated.rating}>
-                                            <tr 
-                                                className={`hover:bg-slate-800/50 ${consolidated.hasChildren ? 'cursor-pointer' : ''}`}
-                                                onClick={() => consolidated.hasChildren && handleToggleExpand(consolidated.rating)}
-                                            >
-                                                <td className="px-3 py-2 text-sm font-semibold">
-                                                    <div className="flex items-center space-x-2">
-                                                        <ChevronIcon expanded={expandedRatings.has(consolidated.rating)} visible={consolidated.hasChildren} />
-                                                        <span>{consolidated.rating}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-3 py-2 text-right text-sm font-mono">{formatNumber(consolidated.prePercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
-                                                <td className="px-3 py-2 text-right text-sm font-mono">{formatNumber(consolidated.postPercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
-                                                <td className={`px-3 py-2 text-right text-sm font-mono ${consolidated.changePercent === 0 ? 'text-slate-400' : consolidated.changePercent > 0 ? 'text-green-400' : 'text-red-400'}`}>{consolidated.changePercent > 0 ? '+' : ''}{formatNumber(consolidated.changePercent, {minimumFractionDigits: 3, maximumFractionDigits: 3})}%</td>
-                                            </tr>
-                                            {consolidated.hasChildren && expandedRatings.has(consolidated.rating) && (
-                                                consolidated.children.map(granular => (
-                                                    <tr key={granular.rating} className="bg-slate-950 hover:bg-slate-800/50">
-                                                        <td className="px-3 py-2 text-sm">
-                                                             <div className="flex items-center pl-8">
-                                                                <span className="text-slate-300">{granular.rating}</span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-3 py-2 text-right text-sm font-mono text-slate-400">{formatNumber(granular.prePercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
-                                                        <td className="px-3 py-2 text-right text-sm font-mono text-slate-400">{formatNumber(granular.postPercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
-                                                        <td className={`px-3 py-2 text-right text-sm font-mono ${granular.changePercent === 0 ? 'text-slate-400' : granular.changePercent > 0 ? 'text-green-400' : 'text-red-400'}`}>{granular.changePercent > 0 ? '+' : ''}{formatNumber(granular.changePercent, {minimumFractionDigits: 3, maximumFractionDigits: 3})}%</td>
-                                                    </tr>
-                                                ))
-                                            )}
-                                        </React.Fragment>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                     </Card>
-                 </div>
-            </div>
+            {result.proposedTrades.length > 0 && (
+                <div className="border-t-2 border-slate-800 pt-6 mt-6">
+                    <h3 className="text-xl font-semibold text-slate-100 mb-4">Post-Trade Analysis</h3>
+                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                        <Card>
+                            <h4 className="text-md font-semibold text-slate-300 mb-4 text-center">Post-Trade KRD Gap</h4>
+                            <ResponsiveContainer width="100%" height={300}>
+                                <BarChart data={postTradeKrdData}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                <XAxis dataKey="tenor" tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }}/>
+                                <YAxis tick={{ fill: '#94a3b8' }} tickLine={{ stroke: '#94a3b8' }}/>
+                                <Tooltip content={<ChartTooltip />} cursor={{fill: '#334155'}}/>
+                                <Bar dataKey="Active KRD" fill="#f97316" />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </Card>
+                        <Card>
+                            <h4 className="text-md font-semibold text-slate-300 mb-4 text-center">Post-Trade Currency Exposure</h4>
+                            <ResponsiveContainer width="100%" height={300}>
+                                <PieChart>
+                                    <Pie data={postTradeCurrencyData} cx="50%" cy="50%" labelLine={false} outerRadius={100} fill="#8884d8" dataKey="value" nameKey="name" label={({ name, percent }) => `${name} ${formatNumber(percent * 100, {maximumFractionDigits: 0})}%`}>
+                                        {postTradeCurrencyData.map((entry, index) => <Cell key={`cell-${index}`} fill={CURRENCY_COLORS[index % CURRENCY_COLORS.length]} />)}
+                                    </Pie>
+                                    <Tooltip formatter={(value: number) => formatCurrency(value, 0, 0)} />
+                                    <Legend wrapperStyle={{ color: '#94a3b8' }} />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </Card>
+                         <Card className="xl:col-span-2">
+                            <h4 className="text-md font-semibold text-slate-300 mb-4 text-center">Credit Rating Distribution Change</h4>
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full divide-y divide-slate-800">
+                                    <thead className="bg-slate-900/50">
+                                        <tr>
+                                            <th className="px-3 py-2 text-left text-xs font-medium text-slate-400 uppercase">Rating</th>
+                                            <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Pre-Trade (%)</th>
+                                            <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Post-Trade (%)</th>
+                                            <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">Change (%)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800">
+                                        {ratingData?.map((consolidated) => (
+                                            <React.Fragment key={consolidated.rating}>
+                                                <tr 
+                                                    className={`hover:bg-slate-800/50 ${consolidated.hasChildren ? 'cursor-pointer' : ''}`}
+                                                    onClick={() => consolidated.hasChildren && handleToggleExpand(consolidated.rating)}
+                                                >
+                                                    <td className="px-3 py-2 text-sm font-semibold">
+                                                        <div className="flex items-center space-x-2">
+                                                            <ChevronIcon expanded={expandedRatings.has(consolidated.rating)} visible={consolidated.hasChildren} />
+                                                            <span>{consolidated.rating}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-3 py-2 text-right text-sm font-mono">{formatNumber(consolidated.prePercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
+                                                    <td className="px-3 py-2 text-right text-sm font-mono">{formatNumber(consolidated.postPercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
+                                                    <td className={`px-3 py-2 text-right text-sm font-mono ${consolidated.changePercent === 0 ? 'text-slate-400' : consolidated.changePercent > 0 ? 'text-green-400' : 'text-red-400'}`}>{consolidated.changePercent > 0 ? '+' : ''}{formatNumber(consolidated.changePercent, {minimumFractionDigits: 3, maximumFractionDigits: 3})}%</td>
+                                                </tr>
+                                                {consolidated.hasChildren && expandedRatings.has(consolidated.rating) && (
+                                                    consolidated.children.map(granular => (
+                                                        <tr key={granular.rating} className="bg-slate-950 hover:bg-slate-800/50">
+                                                            <td className="px-3 py-2 text-sm">
+                                                                 <div className="flex items-center pl-8">
+                                                                    <span className="text-slate-300">{granular.rating}</span>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-3 py-2 text-right text-sm font-mono text-slate-400">{formatNumber(granular.prePercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
+                                                            <td className="px-3 py-2 text-right text-sm font-mono text-slate-400">{formatNumber(granular.postPercent, {minimumFractionDigits: 1, maximumFractionDigits: 1})}%</td>
+                                                            <td className={`px-3 py-2 text-right text-sm font-mono ${granular.changePercent === 0 ? 'text-slate-400' : granular.changePercent > 0 ? 'text-green-400' : 'text-red-400'}`}>{granular.changePercent > 0 ? '+' : ''}{formatNumber(granular.changePercent, {minimumFractionDigits: 3, maximumFractionDigits: 3})}%</td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </React.Fragment>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                         </Card>
+                     </div>
+                </div>
+            )}
         </div>
     )
 }
@@ -449,6 +451,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         setResult(null);
         setActiveTrades(new Set());
         setError(null);
+        sessionStorage.removeItem('optimiser_result');
+        sessionStorage.removeItem('optimiser_activeTrades');
     };
     
     const handleTradeToggle = (pairId: number) => {
@@ -482,9 +486,9 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         const afterPortfolio = calculatePortfolioMetrics(afterPortfolioBonds);
         
         const activeTradedValue = activeProposedTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
-        const activeFeeCost = activeTradedValue * (Number(transactionCost) / 10000);
+        const activeFeeCost = (result.impactAnalysis.before.portfolio.totalMarketValue > 0) ? activeTradedValue * (Number(transactionCost) / 10000) / 2 : 0;
         const activeSpreadCost = activeProposedTrades.reduce((sum, trade) => sum + trade.spreadCost, 0);
-        const activeAggregateFeeBps = activeProposedTrades.length * Number(transactionCost);
+        const activeAggregateFeeBps = activeProposedTrades.length * Number(transactionCost) / 2;
         
         return {
             result,
@@ -581,11 +585,9 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                             <button onClick={handleRunOptimiser} disabled={isLoading} className="flex-1 bg-orange-600 text-white font-bold py-3 px-4 rounded-md hover:bg-orange-700 transition-colors disabled:bg-slate-700 disabled:cursor-not-allowed">
                                 {isLoading ? 'Optimising...' : 'Run Optimiser'}
                             </button>
-                            {result && (
-                                <button onClick={handleResetOptimiser} disabled={isLoading} className="bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-md hover:bg-slate-600 transition-colors">
-                                    Reset
-                                </button>
-                            )}
+                             <button onClick={handleResetOptimiser} disabled={isLoading} className="bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-md hover:bg-slate-600 transition-colors">
+                                Reset
+                            </button>
                         </div>
                         {error && (
                             <div className="mt-4 p-3 bg-red-900/50 border border-red-500/50 rounded-md text-red-300 text-sm" role="alert">
@@ -618,6 +620,47 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                    />
                                 </Card>
                             </motion.div>
+                        )}
+                        {!isLoading && !displayedResult && result?.rationale && (
+                             <motion.div
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="mt-6"
+                            >
+                               <Card>
+                                 <h3 className="text-lg font-semibold text-slate-200 mb-2">Impact Analysis (Before → After)</h3>
+                                  <ImpactRow label="Modified Duration" before={portfolio.modifiedDuration} after={portfolio.modifiedDuration} unit=" yrs" />
+                                  <ImpactRow label="Duration Gap" before={portfolio.modifiedDuration - benchmark.modifiedDuration} after={portfolio.modifiedDuration - benchmark.modifiedDuration} unit=" yrs" />
+                                  <ImpactRow label="Tracking Error" before={calculateTrackingError(portfolio, benchmark)} after={calculateTrackingError(portfolio, benchmark)} unit=" bps" />
+                                  <ImpactRow label="Portfolio Yield" before={portfolio.averageYield} after={portfolio.averageYield} unit=" %" />
+                                 <div className="mt-6">
+                                     <h3 className="text-lg font-semibold text-slate-200 mb-2">Proposed Trades</h3>
+                                     <p className="text-base text-slate-400">{result.rationale}</p>
+                                 </div>
+                                  <div className="mt-6">
+                                      <h3 className="text-lg font-semibold text-slate-200 mb-2">Rationale</h3>
+                                      <p className="text-base text-slate-400 bg-slate-800/50 p-4 rounded-md whitespace-pre-wrap">{result.rationale}</p>
+                                  </div>
+                                  <div className="mt-6">
+                                      <h3 className="text-lg font-semibold text-slate-200 mb-2">Cost-Benefit Summary</h3>
+                                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                                          <div className="bg-slate-800/50 p-3 rounded-md">
+                                              <h4 className="text-xs font-medium text-slate-400 uppercase">Total Cost ($)</h4>
+                                              <p className="text-xl font-mono font-bold text-slate-300 mt-1">$0.00</p>
+                                               <p className="text-xs text-slate-500 mt-1">(Fee: $0.00, Spread: $0.00)</p>
+                                          </div>
+                                          <div className="bg-slate-800/50 p-3 rounded-md">
+                                              <h4 className="text-xs font-medium text-slate-400 uppercase">Cost (bps of NAV)</h4>
+                                              <p className="text-xl font-mono font-bold text-slate-300 mt-1">0.00</p>
+                                          </div>
+                                          <div className="bg-slate-800/50 p-3 rounded-md">
+                                              <h4 className="text-xs font-medium text-slate-400 uppercase">Aggregate Fee (bps)</h4>
+                                              <p className="text-xl font-mono font-bold text-slate-300 mt-1">0</p>
+                                          </div>
+                                      </div>
+                                  </div>
+                               </Card>
+                             </motion.div>
                         )}
                     </AnimatePresence>
                 </div>
