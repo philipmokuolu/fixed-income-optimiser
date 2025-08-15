@@ -118,7 +118,7 @@ export const runOptimizer = (
     // --- 1. SETUP ---
     const beforeMetrics = calculateImpactMetrics(initialPortfolio, benchmark);
     const { mode, maxTurnover, transactionCost } = params;
-    const rationaleSteps: string[] = [];
+    let finalHaltReason = "The maximum number of iterations was reached.";
     const wasInitiallyInBreach = getDurationBreachDistance(beforeMetrics.durationGap, params.maxDurationShortfall, params.maxDurationSurplus) > 0;
 
     const portfolioIsins = new Set(initialPortfolio.bonds.map(b => b.isin));
@@ -163,18 +163,15 @@ export const runOptimizer = (
             const currentBreachDistance = getDurationBreachDistance(currentDurationGap, params.maxDurationShortfall, params.maxDurationSurplus);
             
             const isInBreach = currentBreachDistance > 0;
-            
-            rationaleSteps.push(`\n--- Iteration ${iterations + 1} ---`);
-            rationaleSteps.push(`Current State: Duration Gap = ${formatNumber(currentDurationGap)} yrs, TE = ${formatNumber(currentTE)} bps.`);
 
             if (!isInBreach && currentTE < 1.0) { 
-                rationaleSteps.push("Halt Condition: Portfolio is within duration limits and tracking error is already minimal.");
+                finalHaltReason = "The portfolio is within duration limits and tracking error is already minimal.";
                 break;
             }
 
             const sellableBonds = currentBonds.filter(b => !params.excludedBonds.includes(b.isin));
             if (sellableBonds.length === 0 || buyUniverse.length === 0) {
-                rationaleSteps.push("Halt Condition: No eligible bonds available to sell or buy.");
+                finalHaltReason = "There were no eligible bonds available to sell or buy.";
                 break;
             }
 
@@ -198,15 +195,13 @@ export const runOptimizer = (
                     let tradeMarketValue: number;
 
                     if (isInBreach) {
-                        // **INTELLIGENT TARGETING**: Aim to fix only the breached portion of the gap.
                         let gapToFix = 0;
                         if (currentDurationGap < -params.maxDurationShortfall) {
-                            gapToFix = currentDurationGap - (-params.maxDurationShortfall); // e.g., -0.26 - (-0.1) = -0.16
+                            gapToFix = currentDurationGap - (-params.maxDurationShortfall);
                         } else if (currentDurationGap > params.maxDurationSurplus) {
-                            gapToFix = currentDurationGap - params.maxDurationSurplus; // e.g., 0.25 - 0.1 = 0.15
+                            gapToFix = currentDurationGap - params.maxDurationSurplus;
                         }
                         
-                        // Calculate the ideal trade size to get back to the boundary
                         const idealTradeMV = Math.abs((-gapToFix * currentPortfolio.totalMarketValue) / durationDiff);
 
                         const maxAllowedTradeMV = Math.min(
@@ -219,21 +214,17 @@ export const runOptimizer = (
                         const minBuyNotionalAsMV = buyConstraints.minTradeSize * (buyBond.price / 100);
                         const minPracticalMV = Math.max(minSellNotionalAsMV, minBuyNotionalAsMV);
                         
-                        if (minPracticalMV > maxAllowedTradeMV) {
-                            continue; // This trade is impossible at any practical size
-                        }
+                        if (minPracticalMV > maxAllowedTradeMV) continue;
                         
-                        // Determine the best effort trade size
                         if (idealTradeMV > maxAllowedTradeMV) {
-                            tradeMarketValue = maxAllowedTradeMV; // Cap at max
+                            tradeMarketValue = maxAllowedTradeMV;
                         } else if (idealTradeMV < minPracticalMV) {
-                            tradeMarketValue = minPracticalMV; // Use minimum practical size if ideal is too small
+                            tradeMarketValue = minPracticalMV;
                         } else {
-                            tradeMarketValue = idealTradeMV; // Ideal trade is possible
+                            tradeMarketValue = idealTradeMV;
                         }
 
                     } else {
-                        // When not in breach, use a smaller, exploratory trade size
                         tradeMarketValue = Math.min(maxTradeValue / 10, sellBond.marketValue);
                     }
                     
@@ -242,16 +233,13 @@ export const runOptimizer = (
                     let sellNotional = tradeMarketValue / (sellBond.price / 100);
                     let buyNotional = tradeMarketValue / (buyBond.price / 100);
 
-                    // Apply increments and check against minimums again after rounding
                     const sellConstraints = getTradeConstraints(sellBond);
                     sellNotional = Math.floor(sellNotional / sellConstraints.tradeIncrement) * sellConstraints.tradeIncrement;
                     
                     const buyConstraints = getTradeConstraints(buyBond);
                     buyNotional = Math.floor(buyNotional / buyConstraints.tradeIncrement) * buyConstraints.tradeIncrement;
 
-                    if (sellNotional < sellConstraints.minTradeSize || buyNotional < buyConstraints.minTradeSize) {
-                        continue;
-                    }
+                    if (sellNotional < sellConstraints.minTradeSize || buyNotional < buyConstraints.minTradeSize) continue;
                     
                     const sellTrade = createTradeObject('SELL', sellBond, sellNotional, pairIdCounter);
                     const buyTrade = createTradeObject('BUY', buyBond, buyNotional, pairIdCounter);
@@ -269,7 +257,6 @@ export const runOptimizer = (
                         const teWorsening = newTE - currentTE; 
                         score = (1000 * breachImprovement) - teWorsening;
                     } else {
-                        // If not in breach, score based on TE, but penalize going into breach.
                         if (newBreachDistance > 0) { 
                             score = -Infinity;
                         } else {
@@ -289,8 +276,6 @@ export const runOptimizer = (
 
             if (bestPair && bestPair.score > 0) {
                 const tradesForThisStep = [bestPair.sell, bestPair.buy];
-                rationaleSteps.push(`Action: Execute trade. Sell ${bestPair.sell.name}, Buy ${bestPair.buy.name}. Score: ${formatNumber(bestPair.score)}.`);
-
                 totalTradedValue += bestPair.sell.marketValue;
                 proposedTrades.push(...tradesForThisStep);
                 
@@ -301,15 +286,17 @@ export const runOptimizer = (
                 buyUniverse = buyUniverse.filter(b => b.isin !== bestPair!.buy.isin);
                 pairIdCounter++;
             } else {
-                rationaleSteps.push("Halt Condition: No further beneficial trades found that improve the portfolio's risk profile.");
+                finalHaltReason = "No further beneficial trades could be found to improve the portfolio's risk profile.";
                 break;
             }
             iterations++;
         }
+         if (totalTradedValue >= maxTradeValue) {
+            finalHaltReason = `The turnover limit of ${maxTurnover}% was reached.`;
+        }
     } 
     else if (mode === 'buy-only') {
         let cashToSpend = params.newCashToInvest ?? 0;
-        rationaleSteps.push(`Starting Buy-Only mode with ${formatCurrency(cashToSpend)} to invest.`);
     
         while (cashToSpend > MIN_TRADE_SIZE && iterations < MAX_ITERATIONS) {
             const currentDurationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
@@ -319,11 +306,21 @@ export const runOptimizer = (
             
             for (const buyBond of buyUniverse) {
                 const buyConstraints = getTradeConstraints(buyBond);
-                const maxBuyNotional = cashToSpend / (buyBond.price / 100);
-                
-                if (maxBuyNotional < buyConstraints.minTradeSize) continue;
+
+                const isIG = (RATING_SCALE[buyBond.creditRating] ?? 99) <= RATING_SCALE['BBB-'];
+                const concentrationLimitPercent = isIG ? 0.005 : 0.003; // 0.5% for IG, 0.3% for HY
+                const maxMarketValueByConcentration = initialPortfolio.totalMarketValue * concentrationLimitPercent;
+
+                const maxMarketValue = Math.min(
+                    cashToSpend,
+                    maxMarketValueByConcentration
+                );
+
+                let buyNotional = maxMarketValue / (buyBond.price / 100);
+
+                if (buyNotional < buyConstraints.minTradeSize) continue;
     
-                let buyNotional = Math.floor(maxBuyNotional / buyConstraints.tradeIncrement) * buyConstraints.tradeIncrement;
+                buyNotional = Math.floor(buyNotional / buyConstraints.tradeIncrement) * buyConstraints.tradeIncrement;
                 if (buyNotional < buyConstraints.minTradeSize) continue;
     
                 const buyTrade = createTradeObject('BUY', buyBond, buyNotional, pairIdCounter);
@@ -359,7 +356,6 @@ export const runOptimizer = (
             }
             
             if (bestBuy && bestBuy.score > 0) {
-                rationaleSteps.push(`Action: Buy ${formatCurrency(bestBuy.trade.notional)} of ${bestBuy.trade.name}.`);
                 proposedTrades.push(bestBuy.trade);
                 cashToSpend -= bestBuy.trade.marketValue;
                 
@@ -370,21 +366,23 @@ export const runOptimizer = (
                 buyUniverse = buyUniverse.filter(b => b.isin !== bestBuy!.trade.isin);
                 pairIdCounter++;
             } else {
-                rationaleSteps.push("Halt Condition: No further beneficial buy trades found.");
+                finalHaltReason = "No further beneficial buy trades could be found that meet the criteria.";
                 break;
             }
             iterations++;
+        }
+        if (cashToSpend <= MIN_TRADE_SIZE) {
+            finalHaltReason = `The investment budget of ${formatCurrency(params.newCashToInvest ?? 0)} has been fully allocated.`
         }
     }
     else if (mode === 'sell-only') {
         let cashRaised = 0;
         const cashToRaise = params.cashToRaise ?? 0;
-        rationaleSteps.push(`Starting Sell-Only mode with a target of ${formatCurrency(cashToRaise)} to raise.`);
     
         while (cashRaised < cashToRaise && iterations < MAX_ITERATIONS) {
             const sellableBonds = currentBonds.filter(b => !params.excludedBonds.includes(b.isin));
             if (sellableBonds.length === 0) {
-                rationaleSteps.push("Halt Condition: No more bonds available to sell.");
+                finalHaltReason = "No more bonds were available to sell.";
                 break;
             }
     
@@ -412,12 +410,10 @@ export const runOptimizer = (
                 const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
                 const newTE = calculateTrackingError(tempPortfolio, benchmark);
                 
-                // Scoring for sells is about minimizing harm. Higher score is better.
                 const durGapWorsening = getDurationBreachDistance(newDurGap, params.maxDurationShortfall, params.maxDurationSurplus) - getDurationBreachDistance(currentDurationGap, params.maxDurationShortfall, params.maxDurationSurplus);
                 const teWorsening = newTE - currentTE;
                 const yieldWorsening = currentPortfolio.averageYield - tempPortfolio.averageYield;
                 
-                // We want to minimize worsening, so we negate the values.
                 const score = (-1000 * durGapWorsening) + (-10 * teWorsening) + (-5 * yieldWorsening);
                 if (isNaN(score)) continue;
     
@@ -427,7 +423,6 @@ export const runOptimizer = (
             }
             
             if (bestSell) {
-                 rationaleSteps.push(`Action: Sell ${formatCurrency(bestSell.trade.notional)} of ${bestSell.trade.name}.`);
                 proposedTrades.push(bestSell.trade);
                 cashRaised += bestSell.trade.marketValue;
     
@@ -437,10 +432,13 @@ export const runOptimizer = (
     
                 pairIdCounter++;
             } else {
-                rationaleSteps.push("Halt Condition: No further sell trades found that meet criteria.");
+                finalHaltReason = "No further sell trades could be found that met the criteria.";
                 break;
             }
             iterations++;
+        }
+        if (cashRaised >= cashToRaise) {
+            finalHaltReason = `The cash raising target of ${formatCurrency(cashToRaise)} was met.`;
         }
     }
 
@@ -457,7 +455,13 @@ export const runOptimizer = (
     const estimatedSpreadCost = proposedTrades.reduce((sum, trade) => sum + trade.spreadCost, 0);
     const estimatedCost = estimatedFeeCost + estimatedSpreadCost;
 
-    const summaryRationale = `The optimizer executed ${iterations} iteration(s) to improve the portfolio. \n${wasInitiallyInBreach ? `The primary goal was to fix the duration breach of ${formatNumber(beforeMetrics.durationGap)} years.` : `The primary goal was to reduce the tracking error of ${formatNumber(beforeMetrics.trackingError)} bps.`}\n${rationaleSteps[rationaleSteps.length -1]}`;
+    let summaryRationale = `The optimizer successfully identified ${proposedTrades.length} trade(s) over ${iterations} iteration(s) to improve the portfolio's risk profile.\n\n`;
+    if(wasInitiallyInBreach) {
+        summaryRationale += `The primary objective was to correct the duration gap, which was in breach by ${formatNumber(beforeMetrics.durationGap - (beforeMetrics.durationGap > 0 ? params.maxDurationSurplus : -params.maxDurationShortfall))} years. The secondary objective was to then improve tracking error.\n\n`;
+    } else {
+        summaryRationale += `The primary objective was to reduce tracking error from ${formatNumber(beforeMetrics.trackingError)} bps while respecting all risk limits.\n\n`;
+    }
+    summaryRationale += `The process concluded because: ${finalHaltReason}`;
     
     const aggregateFeeBps = proposedTrades.length * transactionCost;
 

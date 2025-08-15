@@ -348,10 +348,16 @@ interface OptimiserProps {
 }
 
 export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bondMasterData, appSettings }) => {
+    // Raw numeric string state
     const [maxTurnover, setMaxTurnover] = useState(() => sessionStorage.getItem('optimiser_maxTurnover') || '10');
     const [cashToRaise, setCashToRaise] = useState(() => sessionStorage.getItem('optimiser_cashToRaise') || '5000000');
     const [newCashToInvest, setNewCashToInvest] = useState(() => sessionStorage.getItem('optimiser_newCashToInvest') || '5000000');
     const [transactionCost, setTransactionCost] = useState(() => sessionStorage.getItem('optimiser_transactionCost') || '20');
+    
+    // Formatted display state
+    const [displayCashToRaise, setDisplayCashToRaise] = useState('');
+    const [displayNewCashToInvest, setDisplayNewCashToInvest] = useState('');
+
     const [mode, setMode] = useState<'switch' | 'buy-only' | 'sell-only'>('switch');
     const [excludedBonds, setExcludedBonds] = useState<string[]>([]);
     const [eligibilitySearch, setEligibilitySearch] = useState('');
@@ -376,38 +382,29 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         } catch (e) { return new Set(); }
     });
     
+    const formatForDisplay = (value: string) => {
+        const num = parseInt(value.replace(/,/g, ''), 10);
+        return isNaN(num) ? '' : num.toLocaleString();
+    };
+    
     useEffect(() => {
-        sessionStorage.setItem('optimiser_maxTurnover', maxTurnover);
-    }, [maxTurnover]);
-
-     useEffect(() => {
-        sessionStorage.setItem('optimiser_cashToRaise', cashToRaise);
+        setDisplayCashToRaise(formatForDisplay(cashToRaise));
     }, [cashToRaise]);
-    
+
     useEffect(() => {
-        sessionStorage.setItem('optimiser_newCashToInvest', newCashToInvest);
+        setDisplayNewCashToInvest(formatForDisplay(newCashToInvest));
     }, [newCashToInvest]);
-
-    useEffect(() => {
-        sessionStorage.setItem('optimiser_transactionCost', transactionCost);
-    }, [transactionCost]);
-
-    useEffect(() => {
-        sessionStorage.setItem('optimiser_horizonLimit', investmentHorizonLimit);
-    }, [investmentHorizonLimit]);
     
+    useEffect(() => { sessionStorage.setItem('optimiser_maxTurnover', maxTurnover); }, [maxTurnover]);
+    useEffect(() => { sessionStorage.setItem('optimiser_cashToRaise', cashToRaise); }, [cashToRaise]);
+    useEffect(() => { sessionStorage.setItem('optimiser_newCashToInvest', newCashToInvest); }, [newCashToInvest]);
+    useEffect(() => { sessionStorage.setItem('optimiser_transactionCost', transactionCost); }, [transactionCost]);
+    useEffect(() => { sessionStorage.setItem('optimiser_horizonLimit', investmentHorizonLimit); }, [investmentHorizonLimit]);
+    useEffect(() => { sessionStorage.setItem('optimiser_minRating', minimumPurchaseRating); }, [minimumPurchaseRating]);
     useEffect(() => {
-        sessionStorage.setItem('optimiser_minRating', minimumPurchaseRating);
-    }, [minimumPurchaseRating]);
-    
-    useEffect(() => {
-        if (result) {
-            sessionStorage.setItem('optimiser_result', JSON.stringify(result));
-        } else {
-            sessionStorage.removeItem('optimiser_result');
-        }
+        if (result) sessionStorage.setItem('optimiser_result', JSON.stringify(result));
+        else sessionStorage.removeItem('optimiser_result');
     }, [result]);
-
     useEffect(() => {
         sessionStorage.setItem('optimiser_activeTrades', JSON.stringify(Array.from(activeTrades)));
     }, [activeTrades]);
@@ -513,11 +510,26 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     }, [portfolio.bonds, eligibilitySearch]);
     
     const paramLabel = mode === 'buy-only' ? 'New Cash to Invest ($)' : mode === 'sell-only' ? 'Cash to Raise ($)' : 'Max Turnover (%)';
-    const paramValue = mode === 'buy-only' ? newCashToInvest : mode === 'sell-only' ? cashToRaise : maxTurnover;
-    const paramOnChange = (value: string) => {
-        if (mode === 'buy-only') setNewCashToInvest(value);
-        else if (mode === 'sell-only') setCashToRaise(value);
-        else setMaxTurnover(value);
+
+    const handleParamChange = (value: string) => {
+        const numericValue = value.replace(/,/g, '');
+        if (/^\d*$/.test(numericValue)) { // only allow digits
+            if (mode === 'buy-only') {
+                setNewCashToInvest(numericValue);
+                setDisplayNewCashToInvest(formatForDisplay(numericValue));
+            } else if (mode === 'sell-only') {
+                setCashToRaise(numericValue);
+                setDisplayCashToRaise(formatForDisplay(numericValue));
+            } else { // turnover
+                setMaxTurnover(numericValue);
+            }
+        }
+    };
+
+    const getParamValue = () => {
+        if (mode === 'buy-only') return displayNewCashToInvest;
+        if (mode === 'sell-only') return displayCashToRaise;
+        return maxTurnover;
     };
 
     return (
@@ -533,10 +545,10 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                     {paramLabel}
                                 </label>
                                 <input 
-                                    type="number" 
+                                    type={mode === 'switch' ? 'number' : 'text'}
                                     id="paramInput" 
-                                    value={paramValue} 
-                                    onChange={e => paramOnChange(e.target.value)} 
+                                    value={getParamValue()} 
+                                    onChange={e => handleParamChange(e.target.value)} 
                                     className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
                                 />
                             </div>
