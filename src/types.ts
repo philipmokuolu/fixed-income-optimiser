@@ -87,6 +87,7 @@ export interface OptimizationParams {
   minimumPurchaseRating: string;
   minimumYield?: number;
   cashToRaise?: number;
+  newCashToInvest?: number;
 }
 
 export interface ProposedTrade {

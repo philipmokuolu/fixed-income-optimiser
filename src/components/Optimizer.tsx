@@ -350,6 +350,7 @@ interface OptimiserProps {
 export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bondMasterData, appSettings }) => {
     const [maxTurnover, setMaxTurnover] = useState(() => sessionStorage.getItem('optimiser_maxTurnover') || '10');
     const [cashToRaise, setCashToRaise] = useState(() => sessionStorage.getItem('optimiser_cashToRaise') || '5000000');
+    const [newCashToInvest, setNewCashToInvest] = useState(() => sessionStorage.getItem('optimiser_newCashToInvest') || '5000000');
     const [transactionCost, setTransactionCost] = useState(() => sessionStorage.getItem('optimiser_transactionCost') || '20');
     const [mode, setMode] = useState<'switch' | 'buy-only' | 'sell-only'>('switch');
     const [excludedBonds, setExcludedBonds] = useState<string[]>([]);
@@ -382,6 +383,10 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
      useEffect(() => {
         sessionStorage.setItem('optimiser_cashToRaise', cashToRaise);
     }, [cashToRaise]);
+    
+    useEffect(() => {
+        sessionStorage.setItem('optimiser_newCashToInvest', newCashToInvest);
+    }, [newCashToInvest]);
 
     useEffect(() => {
         sessionStorage.setItem('optimiser_transactionCost', transactionCost);
@@ -424,10 +429,11 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                     investmentHorizonLimit: Number(investmentHorizonLimit),
                     minimumPurchaseRating: minimumPurchaseRating,
                     cashToRaise: mode === 'sell-only' ? Number(cashToRaise) : undefined,
+                    newCashToInvest: mode === 'buy-only' ? Number(newCashToInvest) : undefined,
                 };
 
-                if (isNaN(params.maxTurnover) || isNaN(params.transactionCost) || isNaN(params.investmentHorizonLimit) || (params.cashToRaise && isNaN(params.cashToRaise))) {
-                    throw new Error("One of the input parameters (Turnover, Cost, Horizon, Cash) is not a valid number.");
+                if (isNaN(params.maxTurnover) || isNaN(params.transactionCost) || isNaN(params.investmentHorizonLimit) || (params.cashToRaise && isNaN(params.cashToRaise)) || (params.newCashToInvest && isNaN(params.newCashToInvest))) {
+                    throw new Error("One of the input parameters is not a valid number.");
                 }
 
                 const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData);
@@ -445,7 +451,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                 setIsLoading(false);
             }
         }, 500); // simulate async work
-    }, [maxTurnover, cashToRaise, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, portfolio, benchmark, bondMasterData, appSettings]);
+    }, [maxTurnover, cashToRaise, newCashToInvest, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, portfolio, benchmark, bondMasterData, appSettings]);
     
     const handleResetOptimiser = () => {
         setResult(null);
@@ -486,9 +492,9 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         const afterPortfolio = calculatePortfolioMetrics(afterPortfolioBonds);
         
         const activeTradedValue = activeProposedTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
-        const activeFeeCost = (result.impactAnalysis.before.portfolio.totalMarketValue > 0) ? activeTradedValue * (Number(transactionCost) / 10000) / 2 : 0;
+        const activeFeeCost = (mode === 'switch' ? activeTradedValue / 2 : activeTradedValue) * (Number(transactionCost) / 10000);
         const activeSpreadCost = activeProposedTrades.reduce((sum, trade) => sum + trade.spreadCost, 0);
-        const activeAggregateFeeBps = activeProposedTrades.length * Number(transactionCost) / 2;
+        const activeAggregateFeeBps = activeProposedTrades.length * Number(transactionCost);
         
         return {
             result,
@@ -497,7 +503,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             activeSpreadCost,
             activeAggregateFeeBps
         }
-    }, [result, activeTrades, portfolio, bondMasterData, transactionCost]);
+    }, [result, activeTrades, portfolio, bondMasterData, transactionCost, mode]);
 
     const filteredEligibilityBonds = useMemo(() => {
         return portfolio.bonds.filter(b => 
@@ -505,6 +511,14 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             b.isin.toLowerCase().includes(eligibilitySearch.toLowerCase())
         );
     }, [portfolio.bonds, eligibilitySearch]);
+    
+    const paramLabel = mode === 'buy-only' ? 'New Cash to Invest ($)' : mode === 'sell-only' ? 'Cash to Raise ($)' : 'Max Turnover (%)';
+    const paramValue = mode === 'buy-only' ? newCashToInvest : mode === 'sell-only' ? cashToRaise : maxTurnover;
+    const paramOnChange = (value: string) => {
+        if (mode === 'buy-only') setNewCashToInvest(value);
+        else if (mode === 'sell-only') setCashToRaise(value);
+        else setMaxTurnover(value);
+    };
 
     return (
         <div className="p-4 sm:p-6 lg:p-8 space-y-6">
@@ -516,13 +530,13 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                         <div className="space-y-4">
                             <div>
                                 <label htmlFor="paramInput" className="block text-sm font-medium text-slate-300">
-                                    {mode === 'buy-only' ? 'New Cash to Invest ($)' : mode === 'sell-only' ? 'Cash to Raise ($)' : 'Max Turnover (%)'}
+                                    {paramLabel}
                                 </label>
                                 <input 
                                     type="number" 
                                     id="paramInput" 
-                                    value={mode === 'sell-only' ? cashToRaise : maxTurnover} 
-                                    onChange={e => mode === 'sell-only' ? setCashToRaise(e.target.value) : setMaxTurnover(e.target.value)} 
+                                    value={paramValue} 
+                                    onChange={e => paramOnChange(e.target.value)} 
                                     className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
                                 />
                             </div>

@@ -1,6 +1,6 @@
 import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, KrdKey, KRD_TENORS, Bond, ProposedTrade, BondStaticData, ImpactMetrics, Currency } from '@/types';
 import { calculatePortfolioMetrics, applyTradesToPortfolio, calculateTrackingError } from './portfolioService';
-import { formatNumber } from '@/utils/formatting';
+import { formatNumber, formatCurrency } from '@/utils/formatting';
 
 const MIN_TRADE_SIZE = 1000; // Minimum trade size in currency to be considered
 const MAX_ITERATIONS = 50; // Safety break for loops
@@ -265,8 +265,9 @@ export const runOptimizer = (
                     
                     let score;
                     if (isInBreach) {
-                        // Score is purely based on how much the breach distance was reduced.
-                        score = currentBreachDistance - newBreachDistance;
+                        const breachImprovement = currentBreachDistance - newBreachDistance;
+                        const teWorsening = newTE - currentTE; 
+                        score = (1000 * breachImprovement) - teWorsening;
                     } else {
                         // If not in breach, score based on TE, but penalize going into breach.
                         if (newBreachDistance > 0) { 
@@ -306,8 +307,141 @@ export const runOptimizer = (
             iterations++;
         }
     } 
-    else if (mode === 'sell-only' || mode === 'buy-only') {
-        rationaleSteps.push(`Mode '${mode}' is not fully implemented with the new intelligent sizing logic.`);
+    else if (mode === 'buy-only') {
+        let cashToSpend = params.newCashToInvest ?? 0;
+        rationaleSteps.push(`Starting Buy-Only mode with ${formatCurrency(cashToSpend)} to invest.`);
+    
+        while (cashToSpend > MIN_TRADE_SIZE && iterations < MAX_ITERATIONS) {
+            const currentDurationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
+            const currentTE = calculateTrackingError(currentPortfolio, benchmark);
+    
+            let bestBuy: { trade: ProposedTrade, score: number } | null = null;
+            
+            for (const buyBond of buyUniverse) {
+                const buyConstraints = getTradeConstraints(buyBond);
+                const maxBuyNotional = cashToSpend / (buyBond.price / 100);
+                
+                if (maxBuyNotional < buyConstraints.minTradeSize) continue;
+    
+                let buyNotional = Math.floor(maxBuyNotional / buyConstraints.tradeIncrement) * buyConstraints.tradeIncrement;
+                if (buyNotional < buyConstraints.minTradeSize) continue;
+    
+                const buyTrade = createTradeObject('BUY', buyBond, buyNotional, pairIdCounter);
+                
+                const tempBonds = applyTradesToPortfolio(currentBonds, [buyTrade], bondMasterData);
+                const tempPortfolio = calculatePortfolioMetrics(tempBonds);
+    
+                const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
+                const newTE = calculateTrackingError(tempPortfolio, benchmark);
+                
+                const currentBreachDistance = getDurationBreachDistance(currentDurationGap, params.maxDurationShortfall, params.maxDurationSurplus);
+                const newBreachDistance = getDurationBreachDistance(newDurGap, params.maxDurationShortfall, params.maxDurationSurplus);
+                
+                let score;
+                if (currentBreachDistance > 0) {
+                    const breachImprovement = currentBreachDistance - newBreachDistance;
+                    const teWorsening = newTE - currentTE;
+                    score = (1000 * breachImprovement) - teWorsening;
+                } else {
+                    if (newBreachDistance > 0) {
+                        score = -Infinity;
+                    } else {
+                        const teImprovement = currentTE - newTE;
+                        const yieldImprovement = tempPortfolio.averageYield - currentPortfolio.averageYield;
+                        score = (10 * teImprovement) + (5 * yieldImprovement);
+                    }
+                }
+                if (isNaN(score)) continue;
+    
+                if (bestBuy === null || score > bestBuy.score) {
+                    bestBuy = { trade: buyTrade, score };
+                }
+            }
+            
+            if (bestBuy && bestBuy.score > 0) {
+                rationaleSteps.push(`Action: Buy ${formatCurrency(bestBuy.trade.notional)} of ${bestBuy.trade.name}.`);
+                proposedTrades.push(bestBuy.trade);
+                cashToSpend -= bestBuy.trade.marketValue;
+                
+                const newBonds = applyTradesToPortfolio(currentBonds, [bestBuy.trade], bondMasterData);
+                currentPortfolio = calculatePortfolioMetrics(newBonds);
+                currentBonds = currentPortfolio.bonds;
+                
+                buyUniverse = buyUniverse.filter(b => b.isin !== bestBuy!.trade.isin);
+                pairIdCounter++;
+            } else {
+                rationaleSteps.push("Halt Condition: No further beneficial buy trades found.");
+                break;
+            }
+            iterations++;
+        }
+    }
+    else if (mode === 'sell-only') {
+        let cashRaised = 0;
+        const cashToRaise = params.cashToRaise ?? 0;
+        rationaleSteps.push(`Starting Sell-Only mode with a target of ${formatCurrency(cashToRaise)} to raise.`);
+    
+        while (cashRaised < cashToRaise && iterations < MAX_ITERATIONS) {
+            const sellableBonds = currentBonds.filter(b => !params.excludedBonds.includes(b.isin));
+            if (sellableBonds.length === 0) {
+                rationaleSteps.push("Halt Condition: No more bonds available to sell.");
+                break;
+            }
+    
+            const currentDurationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
+            const currentTE = calculateTrackingError(currentPortfolio, benchmark);
+    
+            let bestSell: { trade: ProposedTrade, score: number } | null = null;
+            
+            for (const sellBond of sellableBonds) {
+                const cashStillNeeded = cashToRaise - cashRaised;
+                const maxSellMV = Math.min(sellBond.marketValue, cashStillNeeded);
+                
+                let sellNotional = maxSellMV / (sellBond.price / 100);
+                const sellConstraints = getTradeConstraints(sellBond);
+                
+                if (sellNotional < sellConstraints.minTradeSize) continue;
+                sellNotional = Math.floor(sellNotional / sellConstraints.tradeIncrement) * sellConstraints.tradeIncrement;
+                if (sellNotional < sellConstraints.minTradeSize) continue;
+    
+                const sellTrade = createTradeObject('SELL', sellBond, sellNotional, pairIdCounter);
+    
+                const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade], bondMasterData);
+                const tempPortfolio = calculatePortfolioMetrics(tempBonds);
+    
+                const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
+                const newTE = calculateTrackingError(tempPortfolio, benchmark);
+                
+                // Scoring for sells is about minimizing harm. Higher score is better.
+                const durGapWorsening = getDurationBreachDistance(newDurGap, params.maxDurationShortfall, params.maxDurationSurplus) - getDurationBreachDistance(currentDurationGap, params.maxDurationShortfall, params.maxDurationSurplus);
+                const teWorsening = newTE - currentTE;
+                const yieldWorsening = currentPortfolio.averageYield - tempPortfolio.averageYield;
+                
+                // We want to minimize worsening, so we negate the values.
+                const score = (-1000 * durGapWorsening) + (-10 * teWorsening) + (-5 * yieldWorsening);
+                if (isNaN(score)) continue;
+    
+                if (bestSell === null || score > bestSell.score) {
+                    bestSell = { trade: sellTrade, score };
+                }
+            }
+            
+            if (bestSell) {
+                 rationaleSteps.push(`Action: Sell ${formatCurrency(bestSell.trade.notional)} of ${bestSell.trade.name}.`);
+                proposedTrades.push(bestSell.trade);
+                cashRaised += bestSell.trade.marketValue;
+    
+                const newBonds = applyTradesToPortfolio(currentBonds, [bestSell.trade], bondMasterData);
+                currentPortfolio = calculatePortfolioMetrics(newBonds);
+                currentBonds = currentPortfolio.bonds;
+    
+                pairIdCounter++;
+            } else {
+                rationaleSteps.push("Halt Condition: No further sell trades found that meet criteria.");
+                break;
+            }
+            iterations++;
+        }
     }
 
     // --- 3. FINALIZATION ---
@@ -325,7 +459,7 @@ export const runOptimizer = (
 
     const summaryRationale = `The optimizer executed ${iterations} iteration(s) to improve the portfolio. \n${wasInitiallyInBreach ? `The primary goal was to fix the duration breach of ${formatNumber(beforeMetrics.durationGap)} years.` : `The primary goal was to reduce the tracking error of ${formatNumber(beforeMetrics.trackingError)} bps.`}\n${rationaleSteps[rationaleSteps.length -1]}`;
     
-    const aggregateFeeBps = proposedTrades.length * transactionCost / 2; // For pairs
+    const aggregateFeeBps = proposedTrades.length * transactionCost;
 
     return {
         proposedTrades,
