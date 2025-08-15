@@ -125,47 +125,40 @@ export type RateScenario = Partial<Record<KrdTenor, number>>;
 export const calculateScenarioPnl = (
   entity: Portfolio | Benchmark,
   scenario: RateScenario,
-  portfolioMarketValueForBenchmark: number
+  portfolioMarketValueForBenchmark: number,
+  scenarioType: 'parallel' | 'steepener' | 'flattener' | 'custom'
 ): { pnl: number, pnlPercent: number } => {
-  // This function calculates the estimated Profit & Loss (P&L) based on Key Rate Durations (KRDs).
-  // The formula is an industry-standard approximation for P&L from small interest rate changes:
-  // P&L ≈ -MarketValue * Σ(KRD_tenor * Δyield_tenor)
-  //
-  // Where:
-  // - MarketValue: The market value of the portfolio or benchmark.
-  // - KRD_tenor: The Key Rate Duration for a specific point on the yield curve (e.g., 2y, 5y, 10y).
-  //              It measures the sensitivity of the price to a 1% (100bps) change in that specific key rate.
-  // - Δyield_tenor: The change in yield for that tenor, in decimal form (e.g., 50 bps = 0.005).
-  //
-  // Why the negative sign?
-  // There's an inverse relationship between interest rates and bond prices.
-  // - If rates go UP (Δyield is positive), bond prices go DOWN, resulting in a negative P&L.
-  // - If rates go DOWN (Δyield is negative), bond prices go UP, resulting in a positive P&L.
-  // The negative sign in the formula correctly models this relationship.
-  //
-  // Regarding user query on underperformance:
-  // If Portfolio Duration < Benchmark Duration and rates FALL, the portfolio will gain LESS value than the benchmark.
-  // This results in negative Active P&L (underperformance), which is correct. The code implements this logic.
+  const entityMarketValue = 'totalMarketValue' in entity ? entity.totalMarketValue : portfolioMarketValueForBenchmark;
+  if (entityMarketValue === 0) return { pnl: 0, pnlPercent: 0 };
   
   let pnl = 0;
-  
-  const entityMarketValue = 'totalMarketValue' in entity ? entity.totalMarketValue : portfolioMarketValueForBenchmark;
 
-  if (entityMarketValue === 0) return { pnl: 0, pnlPercent: 0 };
+  // Use the correct mathematical model based on the scenario type.
+  if (scenarioType === 'parallel') {
+    // For a true parallel shift, total Modified Duration is the correct measure.
+    // P&L ≈ -MarketValue * Duration * ΔYield
+    const shiftBps = scenario['1y'] || 0; // In a parallel shift, all tenor shifts are the same.
+    const shiftDecimal = shiftBps / 10000; // Convert bps to decimal (100 bps = 1% = 0.01)
+    pnl = -entity.modifiedDuration * entityMarketValue * shiftDecimal;
 
-  KRD_TENORS.forEach(tenor => {
-    const krdKey: KrdKey = `krd_${tenor}`;
-    const rateChangeBps = scenario[tenor] || 0;
-    if (rateChangeBps !== 0) {
-      const krdValue = entity[krdKey];
-      pnl -= entityMarketValue * krdValue * (rateChangeBps / 10000);
-    }
-  });
+  } else {
+    // For non-parallel shifts (twists, custom curves), KRDs are the correct measure.
+    // P&L ≈ -MarketValue * Σ(KRD_tenor * Δyield_tenor)
+    KRD_TENORS.forEach(tenor => {
+      const krdKey: KrdKey = `krd_${tenor}`;
+      const rateChangeBps = scenario[tenor] || 0;
+      if (rateChangeBps !== 0) {
+        const krdValue = entity[krdKey];
+        pnl -= entityMarketValue * krdValue * (rateChangeBps / 10000);
+      }
+    });
+  }
 
   const pnlPercent = (pnl / entityMarketValue) * 100;
   
   return { pnl, pnlPercent };
 };
+
 
 // This function was previously in optimizerService, moved here for better separation of concerns
 // and to fix circular dependency issues.

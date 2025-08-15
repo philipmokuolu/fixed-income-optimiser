@@ -70,11 +70,11 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
   
   const [scenarioType, setScenarioType] = useState<'parallel' | 'steepener' | 'flattener' | 'custom'>('parallel');
   const [scenarioParams, setScenarioParams] = useState({
-    parallel: '50',
-    steepenerShort: '10',
+    parallel: '100',
+    steepenerShort: '-50',
     steepenerLong: '50',
     flattenerShort: '50',
-    flattenerLong: '10',
+    flattenerLong: '-50',
     custom: KRD_TENORS.reduce((acc, t) => ({ ...acc, [t]: '0' }), {} as Record<KrdTenor, string>)
   });
 
@@ -102,7 +102,7 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
         const staticData: BondStaticData = {
             name: rest.name, currency: rest.currency, maturityDate: rest.maturityDate, coupon: rest.coupon,
             price: rest.price, yieldToMaturity: rest.yieldToMaturity, modifiedDuration: rest.modifiedDuration,
-            creditRating: rest.creditRating, liquidityScore: rest.liquidityScore, krd_1y: rest.krd_1y, krd_2y: rest.krd_2y,
+            creditRating: rest.creditRating, liquidityScore: rest.liquidityScore, bidAskSpread: rest.bidAskSpread, krd_1y: rest.krd_1y, krd_2y: rest.krd_2y,
             krd_3y: rest.krd_3y, krd_5y: rest.krd_5y, krd_7y: rest.krd_7y, krd_10y: rest.krd_10y
         };
         newBondsMap.set(isin, { notional, staticData });
@@ -170,11 +170,31 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
     setTimeout(() => {
         try {
             const scenario: RateScenario = {};
-            // Build scenario based on type
-            KRD_TENORS.forEach(t => scenario[t] = Number(scenarioParams.custom[t]));
+            
+            const tenorMap: Record<KrdTenor, number> = {'1y': 1, '2y': 2, '3y': 3, '5y': 5, '7y': 7, '10y': 10};
 
-            const portfolioPnl = calculateScenarioPnl(simulatedPortfolio, scenario, simulatedPortfolio.totalMarketValue);
-            const benchmarkPnl = calculateScenarioPnl(benchmark, scenario, simulatedPortfolio.totalMarketValue);
+            if (scenarioType === 'parallel') {
+                const shift = Number(scenarioParams.parallel);
+                KRD_TENORS.forEach(t => scenario[t] = shift);
+            } else if (scenarioType === 'steepener' || scenarioType === 'flattener') {
+                const paramsKey = scenarioType === 'steepener' ? 'steepener' : 'flattener';
+                const shortShift = Number(scenarioParams[`${paramsKey}Short`]);
+                const longShift = Number(scenarioParams[`${paramsKey}Long`]);
+                
+                const minTenorNum = tenorMap['1y'];
+                const maxTenorNum = tenorMap['10y'];
+                
+                KRD_TENORS.forEach(t => {
+                    const tNum = tenorMap[t];
+                    const interpolatedShift = shortShift + ( (tNum - minTenorNum) / (maxTenorNum - minTenorNum) ) * (longShift - shortShift);
+                    scenario[t] = interpolatedShift;
+                });
+            } else { // 'custom'
+                KRD_TENORS.forEach(t => scenario[t] = Number(scenarioParams.custom[t]));
+            }
+
+            const portfolioPnl = calculateScenarioPnl(simulatedPortfolio, scenario, simulatedPortfolio.totalMarketValue, scenarioType);
+            const benchmarkPnl = calculateScenarioPnl(benchmark, scenario, simulatedPortfolio.totalMarketValue, scenarioType);
 
             setScenarioResult({
                 portfolioPnl: portfolioPnl.pnl,
@@ -190,7 +210,7 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
             setIsAnalyzing(false);
         }
     }, 500);
-  }, [simulatedPortfolio, benchmark, scenarioParams]);
+  }, [simulatedPortfolio, benchmark, scenarioParams, scenarioType]);
 
   const handleScenarioParamChange = (key: string, value: string) => {
     const newParams = {...scenarioParams};
@@ -306,14 +326,34 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
                    </select>
                 </div>
                  <div className="border-t border-slate-800 pt-4">
-                     <div className="grid grid-cols-3 gap-2">
-                        {KRD_TENORS.map(t => (
-                            <div key={t}>
-                                <label htmlFor={`custom-${t}`} className="block text-xs font-medium text-slate-400">{t} Shift (bps)</label>
-                                <input type="number" id={`custom-${t}`} value={scenarioParams.custom[t]} onChange={e => handleScenarioParamChange(`custom.${t}`, e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                    {scenarioType === 'parallel' && (
+                        <div>
+                            <label htmlFor="parallel-shift" className="block text-xs font-medium text-slate-400">Shift (bps)</label>
+                            <input type="number" id="parallel-shift" value={scenarioParams.parallel} onChange={e => handleScenarioParamChange('parallel', e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                        </div>
+                    )}
+                    {(scenarioType === 'steepener' || scenarioType === 'flattener') && (
+                        <div className="grid grid-cols-2 gap-2">
+                             <div>
+                                <label htmlFor={`${scenarioType}-short`} className="block text-xs font-medium text-slate-400">1Y Shift (bps)</label>
+                                <input type="number" id={`${scenarioType}-short`} value={scenarioType === 'steepener' ? scenarioParams.steepenerShort : scenarioParams.flattenerShort} onChange={e => handleScenarioParamChange(`${scenarioType}Short`, e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
                             </div>
-                        ))}
-                    </div>
+                             <div>
+                                <label htmlFor={`${scenarioType}-long`} className="block text-xs font-medium text-slate-400">10Y Shift (bps)</label>
+                                <input type="number" id={`${scenarioType}-long`} value={scenarioType === 'steepener' ? scenarioParams.steepenerLong : scenarioParams.flattenerLong} onChange={e => handleScenarioParamChange(`${scenarioType}Long`, e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                            </div>
+                        </div>
+                    )}
+                    {scenarioType === 'custom' && (
+                        <div className="grid grid-cols-3 gap-2">
+                            {KRD_TENORS.map(t => (
+                                <div key={t}>
+                                    <label htmlFor={`custom-${t}`} className="block text-xs font-medium text-slate-400">{t} Shift (bps)</label>
+                                    <input type="number" id={`custom-${t}`} value={scenarioParams.custom[t]} onChange={e => handleScenarioParamChange(`custom.${t}`, e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                  </div>
                 <button onClick={handleRunAnalysis} disabled={isAnalyzing} className="w-full bg-orange-600 text-white font-bold py-2 px-4 rounded-md hover:bg-orange-700 disabled:bg-slate-700 transition-colors flex justify-center items-center">
                     {isAnalyzing ? <LoadingSpinner/> : "Analyse P&L Impact"}
