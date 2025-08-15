@@ -63,10 +63,12 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
   const [hypotheticalTrades, setHypotheticalTrades] = useState<HypotheticalTrade[]>([]);
   
   const [tradeNotionalStr, setTradeNotionalStr] = useState('1000000');
+  const [displayTradeNotional, setDisplayTradeNotional] = useState('');
   const [selectedExistingBond, setSelectedExistingBond] = useState<string>(portfolio.bonds[0]?.isin || '');
   
   const [newBondIsin, setNewBondIsin] = useState('');
   const [newBondTradeNotionalStr, setNewBondTradeNotionalStr] = useState('1000000');
+  const [displayNewBondTradeNotional, setDisplayNewBondTradeNotional] = useState('');
   
   const [scenarioType, setScenarioType] = useState<'parallel' | 'steepener' | 'flattener' | 'custom'>('parallel');
   const [scenarioParams, setScenarioParams] = useState({
@@ -87,6 +89,35 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
   useEffect(() => {
       setHypotheticalTrades(dataService.loadSandboxTrades());
   }, []);
+
+  const formatForDisplay = (value: string) => {
+    const num = parseInt(value.replace(/,/g, ''), 10);
+    return isNaN(num) ? '' : num.toLocaleString();
+  };
+
+  useEffect(() => {
+    setDisplayTradeNotional(formatForDisplay(tradeNotionalStr));
+  }, [tradeNotionalStr]);
+
+  useEffect(() => {
+    setDisplayNewBondTradeNotional(formatForDisplay(newBondTradeNotionalStr));
+  }, [newBondTradeNotionalStr]);
+
+  const handleTradeNotionalChange = (value: string) => {
+    const numericValue = value.replace(/,/g, '');
+    if (/^\d*$/.test(numericValue)) {
+        setTradeNotionalStr(numericValue);
+        setDisplayTradeNotional(formatForDisplay(numericValue));
+    }
+  };
+
+  const handleNewBondTradeNotionalChange = (value: string) => {
+      const numericValue = value.replace(/,/g, '');
+      if (/^\d*$/.test(numericValue)) {
+          setNewBondTradeNotionalStr(numericValue);
+          setDisplayNewBondTradeNotional(formatForDisplay(numericValue));
+      }
+  };
   
   const updateTrades = (trades: HypotheticalTrade[]) => {
       setHypotheticalTrades(trades);
@@ -257,7 +288,7 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
                    </div>
                    <div className="mt-2">
                       <label htmlFor="tradeAmount" className="block text-sm font-medium text-slate-400">Trade Amount (Notional)</label>
-                      <input type="text" id="tradeAmount" value={tradeNotionalStr} onChange={e => setTradeNotionalStr(e.target.value.replace(/,/g, ''))} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                      <input type="text" id="tradeAmount" value={displayTradeNotional} onChange={e => handleTradeNotionalChange(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
                    </div>
                    <div className="mt-3 flex space-x-2">
                         <button onClick={() => addTrade({ action: 'BUY', isin: selectedExistingBond, notional: Number(tradeNotionalStr)})} className="flex-1 bg-green-600 text-white font-bold py-2 px-4 rounded-md hover:bg-green-700 transition-colors text-sm">Buy</button>
@@ -278,7 +309,7 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
                     )}
                     <div className="mt-2">
                       <label htmlFor="newTradeAmount" className="block text-sm font-medium text-slate-400">Trade Amount (Notional)</label>
-                      <input type="text" id="newTradeAmount" value={newBondTradeNotionalStr} onChange={e => setNewBondTradeNotionalStr(e.target.value.replace(/,/g, ''))} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                      <input type="text" id="newTradeAmount" value={displayNewBondTradeNotional} onChange={e => handleNewBondTradeNotionalChange(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
                    </div>
                    <div className="mt-3 flex space-x-2">
                         <button onClick={() => addTrade({ action: 'BUY', isin: newBondIsin.trim().toUpperCase(), notional: Number(newBondTradeNotionalStr)})} disabled={!prospectiveNewBond} className="flex-1 bg-green-600 text-white font-bold py-2 px-4 rounded-md hover:bg-green-700 transition-colors text-sm disabled:bg-slate-700 disabled:cursor-not-allowed">Buy New</button>
