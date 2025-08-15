@@ -178,46 +178,82 @@ export const runOptimizer = (
                 break;
             }
 
-            // Find best trade pair using scoring
             let bestPair: { sell: ProposedTrade, buy: ProposedTrade, score: number } | null = null;
             
-            const isPortfolioShort = currentDurationGap < 0;
-            const sellCandidates = [...sellableBonds].sort((a,b) => isPortfolioShort ? b.modifiedDuration - a.modifiedDuration : a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
-            const buyCandidates = [...buyUniverse].sort((a,b) => isPortfolioShort ? a.modifiedDuration - b.modifiedDuration : b.modifiedDuration - a.modifiedDuration).slice(0, TOP_N_CANDIDATES);
+            const needsToIncreaseDuration = currentDurationGap < -params.maxDurationShortfall;
+            const needsToDecreaseDuration = currentDurationGap > params.maxDurationSurplus;
+            
+            // Heuristically sort candidates to check the most promising ones first
+            const sellCandidates = [...sellableBonds].sort((a,b) => needsToIncreaseDuration ? a.modifiedDuration - b.modifiedDuration : b.modifiedDuration - a.modifiedDuration).slice(0, TOP_N_CANDIDATES);
+            const buyCandidates = [...buyUniverse].sort((a,b) => needsToIncreaseDuration ? b.modifiedDuration - a.modifiedDuration : a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
 
             for (const sellBond of sellCandidates) {
                 for (const buyBond of buyCandidates) {
 
-                    const durationDiffPerNotional = (buyBond.modifiedDuration * (buyBond.price/100)) - (sellBond.modifiedDuration * (sellBond.price/100));
+                    const durationDiff = buyBond.modifiedDuration - sellBond.modifiedDuration;
+                    if ( (needsToIncreaseDuration && durationDiff <= 0) || (needsToDecreaseDuration && durationDiff >= 0) ) {
+                        continue; // Skip pairs that move duration in the wrong direction
+                    }
                     
-                    if (Math.abs(durationDiffPerNotional) < 1e-6) continue;
+                    let tradeMarketValue: number;
 
-                    let idealNotional = 0;
                     if (isInBreach) {
-                        // Calculate the targeted notional to precisely close the duration gap
-                        const targetDurationChange = -currentDurationGap * currentPortfolio.totalMarketValue;
-                        idealNotional = targetDurationChange / durationDiffPerNotional;
+                        // **INTELLIGENT TARGETING**: Aim to fix only the breached portion of the gap.
+                        let gapToFix = 0;
+                        if (currentDurationGap < -params.maxDurationShortfall) {
+                            gapToFix = currentDurationGap - (-params.maxDurationShortfall); // e.g., -0.26 - (-0.1) = -0.16
+                        } else if (currentDurationGap > params.maxDurationSurplus) {
+                            gapToFix = currentDurationGap - params.maxDurationSurplus; // e.g., 0.25 - 0.1 = 0.15
+                        }
+                        
+                        // Calculate the ideal trade size to get back to the boundary
+                        const idealTradeMV = Math.abs((-gapToFix * currentPortfolio.totalMarketValue) / durationDiff);
+
+                        const maxAllowedTradeMV = Math.min(
+                            maxTradeValue - totalTradedValue,
+                            sellBond.marketValue
+                        );
+                        const sellConstraints = getTradeConstraints(sellBond);
+                        const minSellNotionalAsMV = sellConstraints.minTradeSize * (sellBond.price / 100);
+                        const buyConstraints = getTradeConstraints(buyBond);
+                        const minBuyNotionalAsMV = buyConstraints.minTradeSize * (buyBond.price / 100);
+                        const minPracticalMV = Math.max(minSellNotionalAsMV, minBuyNotionalAsMV);
+                        
+                        if (minPracticalMV > maxAllowedTradeMV) {
+                            continue; // This trade is impossible at any practical size
+                        }
+                        
+                        // Determine the best effort trade size
+                        if (idealTradeMV > maxAllowedTradeMV) {
+                            tradeMarketValue = maxAllowedTradeMV; // Cap at max
+                        } else if (idealTradeMV < minPracticalMV) {
+                            tradeMarketValue = minPracticalMV; // Use minimum practical size if ideal is too small
+                        } else {
+                            tradeMarketValue = idealTradeMV; // Ideal trade is possible
+                        }
+
                     } else {
                         // When not in breach, use a smaller, exploratory trade size
-                        idealNotional = (maxTradeValue / 10) / (sellBond.price/100);
+                        tradeMarketValue = Math.min(maxTradeValue / 10, sellBond.marketValue);
                     }
                     
-                    let tradeNotional = Math.min(Math.abs(idealNotional), sellBond.notional, (maxTradeValue - totalTradedValue) / (sellBond.price/100));
+                    if (tradeMarketValue <= 0) continue;
 
-                    // Apply constraints
+                    let sellNotional = tradeMarketValue / (sellBond.price / 100);
+                    let buyNotional = tradeMarketValue / (buyBond.price / 100);
+
+                    // Apply increments and check against minimums again after rounding
                     const sellConstraints = getTradeConstraints(sellBond);
-                    const buyConstraints = getTradeConstraints(buyBond);
-
-                    // Round down to nearest valid increment
-                    tradeNotional = Math.floor(tradeNotional / sellConstraints.tradeIncrement) * sellConstraints.tradeIncrement;
+                    sellNotional = Math.floor(sellNotional / sellConstraints.tradeIncrement) * sellConstraints.tradeIncrement;
                     
-                    const buyNotional = tradeNotional * (sellBond.price / buyBond.price);
+                    const buyConstraints = getTradeConstraints(buyBond);
+                    buyNotional = Math.floor(buyNotional / buyConstraints.tradeIncrement) * buyConstraints.tradeIncrement;
 
-                    if (tradeNotional < sellConstraints.minTradeSize || buyNotional < buyConstraints.minTradeSize) {
+                    if (sellNotional < sellConstraints.minTradeSize || buyNotional < buyConstraints.minTradeSize) {
                         continue;
                     }
-
-                    const sellTrade = createTradeObject('SELL', sellBond, tradeNotional, pairIdCounter);
+                    
+                    const sellTrade = createTradeObject('SELL', sellBond, sellNotional, pairIdCounter);
                     const buyTrade = createTradeObject('BUY', buyBond, buyNotional, pairIdCounter);
 
                     const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData);
@@ -229,9 +265,11 @@ export const runOptimizer = (
                     
                     let score;
                     if (isInBreach) {
+                        // Score is purely based on how much the breach distance was reduced.
                         score = currentBreachDistance - newBreachDistance;
                     } else {
-                        if (newBreachDistance > 0) {
+                        // If not in breach, score based on TE, but penalize going into breach.
+                        if (newBreachDistance > 0) { 
                             score = -Infinity;
                         } else {
                             const teImprovement = currentTE - newTE;
