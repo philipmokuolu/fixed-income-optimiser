@@ -33,6 +33,8 @@ export interface BenchmarkHolding {
 // Represents the master data for a bond, excluding position-specific details.
 export interface BondStaticData extends Omit<Bond, 'isin' | 'notional' | 'marketValue' | 'portfolioWeight' | 'durationContribution'> {
   bidAskSpread: number;
+  minTradeSize?: number;
+  tradeIncrement?: number;
 }
 
 // Data structure for a single bond holding in the portfolio
@@ -52,6 +54,8 @@ export interface Bond extends KRDFields {
   creditRating: string;
   liquidityScore: number;
   bidAskSpread: number;
+  minTradeSize?: number;
+  tradeIncrement?: number;
 }
 
 // Aggregate data for the entire portfolio
