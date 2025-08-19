@@ -1,3 +1,41 @@
+/**
+ * Parses a single line of a CSV file, correctly handling quoted fields that may contain commas.
+ * @param line - The string for a single CSV row.
+ * @returns An array of strings, representing the fields in the row.
+ */
+const parseCsvLine = (line: string): string[] => {
+    const fields: string[] = [];
+    let currentField = '';
+    let inQuotedField = false;
+
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+
+        if (char === '"') {
+            // If we are already inside a quoted field
+            if (inQuotedField) {
+                // Check if this is an escaped quote ("")
+                if (i + 1 < line.length && line[i + 1] === '"') {
+                    currentField += '"';
+                    i++; // Skip the next quote
+                } else {
+                    // This is the closing quote
+                    inQuotedField = false;
+                }
+            } else {
+                // This is the opening quote of a new field
+                inQuotedField = true;
+            }
+        } else if (char === ',' && !inQuotedField) {
+            fields.push(currentField);
+            currentField = '';
+        } else {
+            currentField += char;
+        }
+    }
+    fields.push(currentField);
+    return fields;
+};
 
 
 export const parseCsvToJson = <T>(
@@ -23,8 +61,10 @@ export const parseCsvToJson = <T>(
             if (lines.length < 2) {
                 return reject(new Error("CSV must contain a header row and at least one data row."));
             }
-
-            const fileHeaders = lines[0].split(',').map(h => h.trim());
+            
+            // A bug in some CSV exports includes a BOM character at the start of the file.
+            const cleanHeaderLine = lines[0].replace(/^\uFEFF/, '');
+            const fileHeaders = cleanHeaderLine.split(',').map(h => h.trim());
             
             const headerIndexMap: Record<string, number> = {};
             fileHeaders.forEach((h, index) => {
@@ -40,20 +80,16 @@ export const parseCsvToJson = <T>(
             const errorStrings = new Set(['#N/A', '#VALUE!', '#REF!', '#DIV/0!', '#NUM!', '#NAME?', '#NULL!']);
 
             for (let i = 1; i < lines.length; i++) {
-                const values = lines[i].split(',');
+                // Use a robust CSV line parser that handles quoted fields
+                const values = parseCsvLine(lines[i]);
                 const obj: any = {};
                 
                 for (const expectedKey of expectedHeaders) {
                     const index = headerIndexMap[expectedKey.toLowerCase()];
 
-                    if (index !== undefined) { 
+                    if (index !== undefined && index < values.length) { 
                         let value = values[index]?.trim() || '';
 
-                        // Strip surrounding quotes which might be present on some numeric values
-                        if (value.startsWith('"') && value.endsWith('"')) {
-                            value = value.slice(1, -1);
-                        }
-                        
                         const isErrorString = errorStrings.has(value.toUpperCase());
                         const isMaturityDateColumn = expectedKey.toLowerCase() === 'maturitydate';
                         
@@ -61,14 +97,10 @@ export const parseCsvToJson = <T>(
                         const cleanedForNumber = value.replace(/,/g, '');
 
                         if (isErrorString) {
-                            // For maturity date, preserve the error string (e.g., "#N/A") as "N/A" for the parser.
-                            // For all other columns, convert to 0 to maintain existing behavior for numeric fields.
                             obj[expectedKey] = isMaturityDateColumn ? "N/A" : 0;
-                        } else if (!isNaN(Number(cleanedForNumber)) && cleanedForNumber.trim() !== '' && !isMaturityDateColumn) {
-                            // It's a valid number in a column that is NOT maturityDate. Convert to number.
+                        } else if (!isMaturityDateColumn && cleanedForNumber.trim() !== '' && !isNaN(Number(cleanedForNumber))) {
                             obj[expectedKey] = Number(cleanedForNumber);
                         } else {
-                            // It's a regular string, or a value in the maturityDate column. Keep as original (but quote-stripped) string.
                             obj[expectedKey] = value;
                         }
                     }

@@ -101,9 +101,17 @@ const getTradeConstraints = (bond: Bond | (BondStaticData & { isin: string })) =
         defaults = { minTradeSize: 100000, tradeIncrement: 1000 };
     }
     
+    const minTradeSize = bond.minTradeSize ?? defaults.minTradeSize;
+    let tradeIncrement = bond.tradeIncrement ?? defaults.tradeIncrement;
+
+    // Guard against zero, negative, or non-numeric trade increments to prevent division by zero.
+    if (typeof tradeIncrement !== 'number' || !isFinite(tradeIncrement) || tradeIncrement <= 0) {
+        tradeIncrement = defaults.tradeIncrement;
+    }
+
     return {
-        minTradeSize: bond.minTradeSize ?? defaults.minTradeSize,
-        tradeIncrement: bond.tradeIncrement ?? defaults.tradeIncrement,
+        minTradeSize,
+        tradeIncrement,
     };
 };
 
