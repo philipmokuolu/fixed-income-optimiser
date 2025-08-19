@@ -47,19 +47,28 @@ export const parseCsvToJson = <T>(
                     const index = headerIndexMap[expectedKey.toLowerCase()];
 
                     if (index !== undefined) { 
-                        const value = values[index]?.trim() || '';
+                        let value = values[index]?.trim() || '';
+
+                        // Strip surrounding quotes which might be present on some numeric values
+                        if (value.startsWith('"') && value.endsWith('"')) {
+                            value = value.slice(1, -1);
+                        }
+                        
                         const isErrorString = errorStrings.has(value.toUpperCase());
                         const isMaturityDateColumn = expectedKey.toLowerCase() === 'maturitydate';
+                        
+                        // Clean value for numeric conversion by removing commas
+                        const cleanedForNumber = value.replace(/,/g, '');
 
                         if (isErrorString) {
                             // For maturity date, preserve the error string (e.g., "#N/A") as "N/A" for the parser.
                             // For all other columns, convert to 0 to maintain existing behavior for numeric fields.
                             obj[expectedKey] = isMaturityDateColumn ? "N/A" : 0;
-                        } else if (!isNaN(Number(value)) && value !== '' && !isMaturityDateColumn) {
+                        } else if (!isNaN(Number(cleanedForNumber)) && cleanedForNumber.trim() !== '' && !isMaturityDateColumn) {
                             // It's a valid number in a column that is NOT maturityDate. Convert to number.
-                            obj[expectedKey] = Number(value);
+                            obj[expectedKey] = Number(cleanedForNumber);
                         } else {
-                            // It's a regular string, or a value in the maturityDate column. Keep as string.
+                            // It's a regular string, or a value in the maturityDate column. Keep as original (but quote-stripped) string.
                             obj[expectedKey] = value;
                         }
                     }
