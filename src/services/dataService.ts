@@ -1,4 +1,4 @@
-import { PortfolioHolding, BondStaticData, BenchmarkAggregate, BenchmarkHolding, AppSettings, HypotheticalTrade } from "@/types";
+import { PortfolioHolding, BondStaticData, BenchmarkAggregate, BenchmarkHolding, AppSettings, HypotheticalTrade, FxRates } from "@/types";
 
 // Import static data as fallbacks
 import { portfolioHoldings as staticHoldings } from "@/data/portfolioHoldings";
@@ -13,6 +13,7 @@ const LS_KEYS = {
     BENCHMARK_HOLDINGS: 'FIPO_BENCHMARK_HOLDINGS',
     APP_SETTINGS: 'FIPO_APP_SETTINGS',
     SANDBOX_TRADES: 'FIPO_SANDBOX_TRADES',
+    FX_RATES: 'FIPO_FX_RATES',
 };
 
 // --- SAVE FUNCTIONS ---
@@ -64,6 +65,14 @@ export const saveSandboxTrades = (trades: HypotheticalTrade[]): void => {
         console.error("Error saving sandbox trades to localStorage", e);
     }
 }
+
+export const saveFxRates = (rates: FxRates): void => {
+    try {
+        localStorage.setItem(LS_KEYS.FX_RATES, JSON.stringify(rates));
+    } catch (e) {
+        console.error("Error saving FX rates to localStorage", e);
+    }
+};
 
 // --- LOAD FUNCTIONS ---
 
@@ -139,6 +148,23 @@ export const loadSandboxTrades = (): HypotheticalTrade[] => {
         console.error("Error loading sandbox trades from localStorage, using empty list.", e);
         return [];
     }
+};
+
+export const loadFxRates = (): FxRates => {
+    try {
+        const storedData = localStorage.getItem(LS_KEYS.FX_RATES);
+        if (storedData) {
+            return JSON.parse(storedData);
+        }
+    } catch (e) {
+        console.error("Error loading FX rates from localStorage, using defaults.", e);
+    }
+    // Default rates if nothing is stored
+    return {
+        USD: 1.0,
+        EUR: 1.08,
+        GBP: 1.27,
+    };
 };
 
 // --- CLEAR FUNCTIONS ---

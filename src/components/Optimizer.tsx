@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData, AppSettings, ProposedTrade, Portfolio as PortfolioType, KRD_TENORS, KrdKey, Bond } from '@/types';
+// FIX: Import FxRates type
+import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData, AppSettings, ProposedTrade, Portfolio as PortfolioType, KRD_TENORS, KrdKey, Bond, FxRates } from '@/types';
 import { Card } from '@/components/shared/Card';
 import * as optimizerService from '@/services/optimizerService';
 import { formatNumber, formatCurrency, formatCurrencyM } from '@/utils/formatting';
@@ -345,9 +346,11 @@ interface OptimiserProps {
     benchmark: Benchmark;
     bondMasterData: Record<string, BondStaticData>;
     appSettings: AppSettings;
+    // FIX: Add fxRates to props
+    fxRates: FxRates;
 }
 
-export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bondMasterData, appSettings }) => {
+export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bondMasterData, appSettings, fxRates }) => {
     // Raw numeric string state
     const [maxTurnover, setMaxTurnover] = useState(() => sessionStorage.getItem('optimiser_maxTurnover') || '10');
     const [cashToRaise, setCashToRaise] = useState(() => sessionStorage.getItem('optimiser_cashToRaise') || '5000000');
@@ -433,7 +436,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                     throw new Error("One of the input parameters is not a valid number.");
                 }
 
-                const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData);
+                // FIX: Pass fxRates to the optimizer service.
+                const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData, fxRates);
                 
                 if (!optoResult) {
                     throw new Error("Optimizer returned no result. This may be due to an internal calculation error.");
@@ -448,7 +452,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                 setIsLoading(false);
             }
         }, 500); // simulate async work
-    }, [maxTurnover, cashToRaise, newCashToInvest, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, portfolio, benchmark, bondMasterData, appSettings]);
+    // FIX: Add fxRates to the dependency array.
+    }, [maxTurnover, cashToRaise, newCashToInvest, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, portfolio, benchmark, bondMasterData, appSettings, fxRates]);
     
     const handleResetOptimiser = () => {
         setResult(null);
@@ -485,7 +490,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             }
         }
         
-        const afterPortfolioBonds = applyTradesToPortfolio(portfolio.bonds, activeProposedTrades, bondMasterData);
+        // FIX: Pass fxRates to applyTradesToPortfolio.
+        const afterPortfolioBonds = applyTradesToPortfolio(portfolio.bonds, activeProposedTrades, bondMasterData, fxRates);
         const afterPortfolio = calculatePortfolioMetrics(afterPortfolioBonds);
         
         const activeTradedValue = activeProposedTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
@@ -500,7 +506,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             activeSpreadCost,
             activeAggregateFeeBps
         }
-    }, [result, activeTrades, portfolio, bondMasterData, transactionCost, mode]);
+    // FIX: Add fxRates to the dependency array.
+    }, [result, activeTrades, portfolio, bondMasterData, transactionCost, mode, fxRates]);
 
     const filteredEligibilityBonds = useMemo(() => {
         return portfolio.bonds.filter(b => 

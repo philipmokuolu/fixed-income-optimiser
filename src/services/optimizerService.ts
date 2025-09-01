@@ -1,4 +1,5 @@
-import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, KrdKey, KRD_TENORS, Bond, ProposedTrade, BondStaticData, ImpactMetrics, Currency } from '@/types';
+// FIX: Import FxRates type
+import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, KrdKey, KRD_TENORS, Bond, ProposedTrade, BondStaticData, ImpactMetrics, Currency, FxRates } from '@/types';
 import { calculatePortfolioMetrics, applyTradesToPortfolio, calculateTrackingError } from './portfolioService';
 import { formatNumber, formatCurrency } from '@/utils/formatting';
 
@@ -120,7 +121,9 @@ export const runOptimizer = (
   initialPortfolio: Portfolio,
   benchmark: Benchmark,
   params: OptimizationParams,
-  bondMasterData: Record<string, BondStaticData>
+  bondMasterData: Record<string, BondStaticData>,
+  // FIX: Add fxRates parameter to be passed to portfolio calculation functions.
+  fxRates: FxRates
 ): OptimizationResult => {
   try {
     // --- 1. SETUP ---
@@ -252,7 +255,8 @@ export const runOptimizer = (
                     const sellTrade = createTradeObject('SELL', sellBond, sellNotional, pairIdCounter);
                     const buyTrade = createTradeObject('BUY', buyBond, buyNotional, pairIdCounter);
 
-                    const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData);
+                    // FIX: Pass fxRates to applyTradesToPortfolio.
+                    const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData, fxRates);
                     const tempPortfolio = calculatePortfolioMetrics(tempBonds);
 
                     const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
@@ -287,7 +291,8 @@ export const runOptimizer = (
                 totalTradedValue += bestPair.sell.marketValue;
                 proposedTrades.push(...tradesForThisStep);
                 
-                const newBonds = applyTradesToPortfolio(currentBonds, tradesForThisStep, bondMasterData);
+                // FIX: Pass fxRates to applyTradesToPortfolio.
+                const newBonds = applyTradesToPortfolio(currentBonds, tradesForThisStep, bondMasterData, fxRates);
                 currentPortfolio = calculatePortfolioMetrics(newBonds);
                 currentBonds = currentPortfolio.bonds;
                 
@@ -333,7 +338,8 @@ export const runOptimizer = (
     
                 const buyTrade = createTradeObject('BUY', buyBond, buyNotional, pairIdCounter);
                 
-                const tempBonds = applyTradesToPortfolio(currentBonds, [buyTrade], bondMasterData);
+                // FIX: Pass fxRates to applyTradesToPortfolio.
+                const tempBonds = applyTradesToPortfolio(currentBonds, [buyTrade], bondMasterData, fxRates);
                 const tempPortfolio = calculatePortfolioMetrics(tempBonds);
     
                 const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
@@ -367,7 +373,8 @@ export const runOptimizer = (
                 proposedTrades.push(bestBuy.trade);
                 cashToSpend -= bestBuy.trade.marketValue;
                 
-                const newBonds = applyTradesToPortfolio(currentBonds, [bestBuy.trade], bondMasterData);
+                // FIX: Pass fxRates to applyTradesToPortfolio.
+                const newBonds = applyTradesToPortfolio(currentBonds, [bestBuy.trade], bondMasterData, fxRates);
                 currentPortfolio = calculatePortfolioMetrics(newBonds);
                 currentBonds = currentPortfolio.bonds;
                 
@@ -412,7 +419,8 @@ export const runOptimizer = (
     
                 const sellTrade = createTradeObject('SELL', sellBond, sellNotional, pairIdCounter);
     
-                const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade], bondMasterData);
+                // FIX: Pass fxRates to applyTradesToPortfolio.
+                const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade], bondMasterData, fxRates);
                 const tempPortfolio = calculatePortfolioMetrics(tempBonds);
     
                 const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
@@ -434,7 +442,8 @@ export const runOptimizer = (
                 proposedTrades.push(bestSell.trade);
                 cashRaised += bestSell.trade.marketValue;
     
-                const newBonds = applyTradesToPortfolio(currentBonds, [bestSell.trade], bondMasterData);
+                // FIX: Pass fxRates to applyTradesToPortfolio.
+                const newBonds = applyTradesToPortfolio(currentBonds, [bestSell.trade], bondMasterData, fxRates);
                 currentPortfolio = calculatePortfolioMetrics(newBonds);
                 currentBonds = currentPortfolio.bonds;
     

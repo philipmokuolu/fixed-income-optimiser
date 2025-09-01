@@ -56,7 +56,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
 
 export const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('marketValue');
+  const [sortKey, setSortKey] = useState<SortKey>('marketValueUSD');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   const handleSort = (key: SortKey) => {
@@ -78,16 +78,31 @@ export const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio }) =
     }
     
     bonds.sort((a, b) => {
-      const aVal = a[sortKey];
-      const bVal = b[sortKey];
+        const aVal = a[sortKey];
+        const bVal = b[sortKey];
 
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
-      }
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-      }
-      return 0;
+        // Robust numeric sort
+        const numA = parseFloat(String(aVal));
+        const numB = parseFloat(String(bVal));
+        const aIsNum = !isNaN(numA);
+        const bIsNum = !isNaN(numB);
+
+        if (aIsNum && bIsNum) {
+            return sortDirection === 'asc' ? numA - numB : numB - numA;
+        }
+
+        // Handle cases where one or both are not numbers by pushing non-numbers to the bottom
+        if (aIsNum && !bIsNum) return -1;
+        if (!aIsNum && bIsNum) return 1;
+
+        // Fallback to robust string sort
+        const strA = String(aVal ?? '').toLowerCase();
+        const strB = String(bVal ?? '').toLowerCase();
+
+        if (strA < strB) return sortDirection === 'asc' ? -1 : 1;
+        if (strA > strB) return sortDirection === 'asc' ? 1 : -1;
+        
+        return 0;
     });
     return bonds;
   }, [portfolio.bonds, searchTerm, sortKey, sortDirection]);
@@ -100,7 +115,7 @@ export const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio }) =
   }, [portfolio]);
 
   const krdExposureData = useMemo(() => {
-    const weight = (b: Bond) => b.marketValue / portfolio.totalMarketValue;
+    const weight = (b: Bond) => b.portfolioWeight;
     return KRD_TENORS.map(t => {
       const krdKey: KrdKey = `krd_${t}`;
       return {

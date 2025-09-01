@@ -8,7 +8,7 @@ import { Optimiser } from '@/components/Optimizer';
 import { Sandbox } from '@/components/Sandbox';
 import { DataHub } from '@/components/DataHub';
 import { Login } from '@/components/Login';
-import { Portfolio, Benchmark, BondStaticData, AppSettings } from '@/types';
+import { Portfolio, Benchmark, BondStaticData, AppSettings, FxRates } from '@/types';
 import { NevastarLogo } from '@/components/shared/NevastarLogo';
 
 type View = 'dashboard' | 'detail' | 'optimiser' | 'sandbox' | 'datahub';
@@ -36,6 +36,7 @@ const App: React.FC = () => {
   const [benchmark, setBenchmark] = useState<Benchmark | null>(null);
   const [bondMasterData, setBondMasterData] = useState<Record<string, BondStaticData> | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [fxRates, setFxRates] = useState<FxRates | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   
   const loadAppData = useCallback(() => {
@@ -48,9 +49,10 @@ const App: React.FC = () => {
         const benchmarkHoldings = dataService.loadBenchmarkHoldings();
         const benchmarkAggregate = dataService.loadBenchmarkAggregate();
         const settings = dataService.loadAppSettings();
+        const rates = dataService.loadFxRates();
         
         // Build portfolio
-        const bonds = buildPortfolio(holdings, masterData);
+        const bonds = buildPortfolio(holdings, masterData, rates);
         setPortfolio(calculatePortfolioMetrics(bonds));
         
         // Build benchmark by combining aggregate data and calculated KRDs
@@ -63,6 +65,7 @@ const App: React.FC = () => {
 
         setBondMasterData(masterData);
         setAppSettings(settings);
+        setFxRates(rates);
         setIsLoading(false);
     }, 100);
   }, []);
@@ -83,7 +86,7 @@ const App: React.FC = () => {
   }
 
   const renderView = () => {
-    if (isLoading || !portfolio || !benchmark || !bondMasterData || !appSettings) {
+    if (isLoading || !portfolio || !benchmark || !bondMasterData || !appSettings || !fxRates) {
         return (
             <div className="w-full h-full flex items-center justify-center">
                 <div className="flex items-center justify-center space-x-2">
@@ -102,7 +105,8 @@ const App: React.FC = () => {
       case 'detail':
         return <PortfolioDetail portfolio={portfolio} />;
       case 'optimiser':
-        return <Optimiser portfolio={portfolio} benchmark={benchmark} bondMasterData={bondMasterData} appSettings={appSettings}/>;
+        // FIX: Pass fxRates to Optimiser component.
+        return <Optimiser portfolio={portfolio} benchmark={benchmark} bondMasterData={bondMasterData} appSettings={appSettings} fxRates={fxRates} />;
       case 'sandbox':
         return <Sandbox portfolio={portfolio} benchmark={benchmark} bondMasterData={bondMasterData} />;
       case 'datahub':

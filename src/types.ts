@@ -31,7 +31,7 @@ export interface BenchmarkHolding {
 }
 
 // Represents the master data for a bond, excluding position-specific details.
-export interface BondStaticData extends Omit<Bond, 'isin' | 'notional' | 'marketValue' | 'portfolioWeight' | 'durationContribution'> {
+export interface BondStaticData extends Omit<Bond, 'isin' | 'notional' | 'marketValue' | 'marketValueUSD' | 'portfolioWeight' | 'durationContribution'> {
   bidAskSpread: number;
   minTradeSize?: number;
   tradeIncrement?: number;
@@ -46,8 +46,9 @@ export interface Bond extends KRDFields {
   coupon: number;
   price: number; // Price per 100
   notional: number;
-  marketValue: number; // Calculated field: notional * price / 100
-  portfolioWeight: number; // Calculated field: marketValue / totalMarketValue
+  marketValue: number; // Calculated field in LOCAL currency: notional * price / 100
+  marketValueUSD: number; // Calculated field in BASE currency (USD)
+  portfolioWeight: number; // Calculated field based on marketValueUSD
   durationContribution: number; // Calculated field
   yieldToMaturity: number;
   modifiedDuration: number;
@@ -61,7 +62,7 @@ export interface Bond extends KRDFields {
 // Aggregate data for the entire portfolio
 export interface Portfolio extends KRDFields {
   bonds: Bond[];
-  totalMarketValue: number;
+  totalMarketValue: number; // This will now be in the base currency (USD)
   modifiedDuration: number;
   averageYield: number;
 }
@@ -88,6 +89,9 @@ export interface OptimizationParams {
   minimumYield?: number;
   cashToRaise?: number;
   newCashToInvest?: number;
+  // New strategic targeting params
+  isTargetingMode?: boolean;
+  targetDurationGap?: number;
 }
 
 export interface ProposedTrade {
@@ -140,3 +144,6 @@ export interface HypotheticalTrade {
     action: 'BUY' | 'SELL';
     notional: number;
 }
+
+// Type for FX rates against a base currency (USD)
+export type FxRates = Record<string, number>;

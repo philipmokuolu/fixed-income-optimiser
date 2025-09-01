@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { FileUploadCard } from '@/components/shared/FileUploadCard';
 import { parseCsvToJson } from '@/services/csvParserService';
 import * as dataService from '@/services/dataService';
-import { PortfolioHolding, BondStaticData, BenchmarkHolding, BenchmarkAggregate, KRD_TENORS, AppSettings } from '@/types';
+import { PortfolioHolding, BondStaticData, BenchmarkHolding, BenchmarkAggregate, KRD_TENORS, AppSettings, FxRates } from '@/types';
 import { Card } from '@/components/shared/Card';
 
 interface DataHubProps {
@@ -11,16 +11,37 @@ interface DataHubProps {
 
 export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
     const [benchmarkAggregate, setBenchmarkAggregate] = useState<BenchmarkAggregate | null>(null);
+    const [bmDurationStr, setBmDurationStr] = useState('');
     const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+    const [fxRates, setFxRates] = useState<FxRates | null>(null);
 
     const [bmStatus, setBmStatus] = useState('');
     const [settingsStatus, setSettingsStatus] = useState('');
-
+    const [fxStatus, setFxStatus] = useState('');
 
     useEffect(() => {
-        setBenchmarkAggregate(dataService.loadBenchmarkAggregate());
-        setAppSettings(dataService.loadAppSettings());
+        const loadedBenchmark = dataService.loadBenchmarkAggregate();
+        const loadedSettings = dataService.loadAppSettings();
+        const loadedFxRates = dataService.loadFxRates();
+
+        setBenchmarkAggregate(loadedBenchmark);
+        setBmDurationStr(String(loadedBenchmark.modifiedDuration));
+        setAppSettings(loadedSettings);
+        setFxRates(loadedFxRates);
     }, []);
+
+    const detectedCurrencies = useMemo(() => {
+        const holdings = dataService.loadPortfolioHoldings();
+        const masterData = dataService.loadBondMasterData();
+        const currencies = new Set<string>();
+        holdings.forEach(h => {
+            const bond = masterData[h.isin];
+            if (bond && bond.currency !== 'USD') {
+                currencies.add(bond.currency);
+            }
+        });
+        return Array.from(currencies);
+    }, [onDataUploaded]); // Re-run when data changes
 
     const handleHoldingsUpload = async (file: File) => {
         const expectedHeaders = ['isin', 'notional'];
@@ -52,9 +73,19 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
         onDataUploaded();
     };
 
-    const handleAggregateChange = (field: keyof BenchmarkAggregate, value: string | number) => {
+    const handleAggregateChange = (field: keyof Omit<BenchmarkAggregate, 'modifiedDuration'>, value: string) => {
         if (benchmarkAggregate) {
             setBenchmarkAggregate({ ...benchmarkAggregate, [field]: value });
+        }
+    };
+    
+    const handleBmDurationChange = (value: string) => {
+        if (/^\d*\.?\d*$/.test(value)) {
+            setBmDurationStr(value);
+            const numValue = parseFloat(value);
+            if (!isNaN(numValue) && benchmarkAggregate) {
+                setBenchmarkAggregate({...benchmarkAggregate, modifiedDuration: numValue});
+            }
         }
     };
 
@@ -69,8 +100,7 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
 
     const handleSettingsChange = (field: keyof AppSettings, value: string) => {
         if (appSettings) {
-             // Ensure we only set positive numbers
-            const numValue = Math.abs(Number(value));
+             const numValue = Math.abs(Number(value));
             setAppSettings({ ...appSettings, [field]: isNaN(numValue) ? 0 : numValue });
         }
     }
@@ -83,6 +113,22 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
             setTimeout(() => setSettingsStatus(''), 3000);
         }
     }, [appSettings, onDataUploaded]);
+    
+    const handleFxRateChange = (currency: string, value: string) => {
+        if (fxRates) {
+            const numValue = Number(value);
+            setFxRates({ ...fxRates, [currency]: isNaN(numValue) ? 0 : numValue });
+        }
+    };
+
+    const handleSaveFxRates = useCallback(() => {
+        if (fxRates) {
+            dataService.saveFxRates(fxRates);
+            setFxStatus('FX rates saved!');
+            onDataUploaded();
+            setTimeout(() => setFxStatus(''), 3000);
+        }
+    }, [fxRates, onDataUploaded]);
 
 
     return (
@@ -122,7 +168,7 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
                             </div>
                              <div>
                                 <label htmlFor="bmDuration" className="block text-sm font-medium text-slate-300">Modified Duration</label>
-                                <input type="number" id="bmDuration" value={benchmarkAggregate.modifiedDuration} onChange={e => handleAggregateChange('modifiedDuration', Number(e.target.value))} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
+                                <input type="text" pattern="[0-9]*\.?[0-9]*" id="bmDuration" value={bmDurationStr} onChange={e => handleBmDurationChange(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"/>
                             </div>
                             <button onClick={handleSaveAggregate} className="w-full bg-orange-600 text-white font-bold py-2 px-4 rounded-md hover:bg-orange-700 transition-colors text-sm">
                                 Save Benchmark Details
@@ -141,7 +187,35 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
                     </div>
                  </Card>
                  <Card>
-                    <h3 className="text-lg font-semibold text-slate-200">Dashboard Settings</h3>
+                    <h3 className="text-lg font-semibold text-slate-200">4. FX Rates</h3>
+                     <p className="text-sm text-slate-400 mt-1 mb-4">Enter exchange rates for all non-USD currencies in your portfolio. (e.g., for EUR, enter the EUR/USD rate)</p>
+                     {fxRates && (
+                         <div className="space-y-4">
+                            {detectedCurrencies.length > 0 ? detectedCurrencies.map(currency => (
+                                <div key={currency}>
+                                    <label htmlFor={`fx-${currency}`} className="block text-sm font-medium text-slate-300">{currency} / USD</label>
+                                    <input 
+                                        type="number"
+                                        id={`fx-${currency}`}
+                                        step="0.0001"
+                                        value={fxRates[currency] || ''}
+                                        onChange={e => handleFxRateChange(currency, e.target.value)}
+                                        className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                                    />
+                                </div>
+                            )) : <p className="text-sm text-slate-500">No non-USD currencies detected in portfolio.</p>}
+                            
+                            {detectedCurrencies.length > 0 && 
+                                <button onClick={handleSaveFxRates} className="w-full bg-orange-600 text-white font-bold py-2 px-4 rounded-md hover:bg-orange-700 transition-colors text-sm">
+                                    Save FX Rates
+                                </button>
+                            }
+                            {fxStatus && <p className="text-green-400 text-xs text-center mt-2">{fxStatus}</p>}
+                         </div>
+                     )}
+                 </Card>
+                 <Card>
+                    <h3 className="text-lg font-semibold text-slate-200">5. Dashboard Settings</h3>
                      <p className="text-sm text-slate-400 mt-1 mb-4">Configure risk thresholds and other display settings.</p>
                      {appSettings && (
                          <div className="space-y-4">

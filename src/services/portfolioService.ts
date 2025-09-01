@@ -1,16 +1,10 @@
-import { Portfolio, Bond, KRDFields, KrdKey, KRD_TENORS, Benchmark, KrdTenor, PortfolioHolding, BondStaticData, BenchmarkHolding, ProposedTrade } from '@/types';
+import { Portfolio, Bond, KRDFields, KrdKey, KRD_TENORS, Benchmark, KrdTenor, PortfolioHolding, BondStaticData, BenchmarkHolding, ProposedTrade, FxRates } from '@/types';
 
 export const buildPortfolio = (
   holdings: PortfolioHolding[], 
-  bondMasterData: Record<string, BondStaticData>
+  bondMasterData: Record<string, BondStaticData>,
+  fxRates: FxRates
 ): Bond[] => {
-  const totalMarketValue = holdings.reduce((sum, holding) => {
-    const staticData = bondMasterData[holding.isin];
-    if (staticData) {
-      return sum + (holding.notional * (staticData.price / 100));
-    }
-    return sum;
-  }, 0);
 
   return holdings.map(holding => {
     const staticData = bondMasterData[holding.isin];
@@ -20,14 +14,17 @@ export const buildPortfolio = (
     }
 
     const marketValue = holding.notional * (staticData.price / 100);
+    const fxRate = fxRates[staticData.currency] || 1.0;
+    const marketValueUSD = marketValue * fxRate;
 
     return {
       ...staticData,
       isin: holding.isin,
       notional: holding.notional,
       marketValue,
-      portfolioWeight: totalMarketValue > 0 ? marketValue / totalMarketValue : 0,
-      durationContribution: 0, // Placeholder, will be calculated in calculatePortfolioMetrics
+      marketValueUSD,
+      portfolioWeight: 0, // Placeholder, calculated in calculatePortfolioMetrics
+      durationContribution: 0, // Placeholder, calculated in calculatePortfolioMetrics
     };
   }).filter(Boolean) as Bond[];
 };
@@ -75,7 +72,7 @@ export const calculateTrackingError = (portfolio: KRDFields, benchmark: KRDField
 };
 
 export const calculatePortfolioMetrics = (bonds: Bond[]): Portfolio => {
-  const totalMarketValue = bonds.reduce((sum, bond) => sum + bond.marketValue, 0);
+  const totalMarketValue = bonds.reduce((sum, bond) => sum + bond.marketValueUSD, 0);
 
   if (totalMarketValue === 0) {
     const zeroKRDs = KRD_TENORS.reduce((acc, tenor) => ({ ...acc, [`krd_${tenor}`]: 0 }), {} as KRDFields);
@@ -91,7 +88,7 @@ export const calculatePortfolioMetrics = (bonds: Bond[]): Portfolio => {
   
   const bondsWithWeights = bonds.map(bond => ({
       ...bond,
-      portfolioWeight: bond.marketValue / totalMarketValue,
+      portfolioWeight: bond.marketValueUSD / totalMarketValue,
   }));
   
   const bondsWithMetrics = bondsWithWeights.map(bond => ({
@@ -99,7 +96,7 @@ export const calculatePortfolioMetrics = (bonds: Bond[]): Portfolio => {
       durationContribution: bond.modifiedDuration * bond.portfolioWeight
   }));
 
-  const weight = (bond: Bond) => bond.marketValue / totalMarketValue;
+  const weight = (bond: Bond) => bond.portfolioWeight;
 
   const modifiedDuration = bondsWithMetrics.reduce((sum, bond) => sum + bond.modifiedDuration * weight(bond), 0);
   
@@ -165,7 +162,8 @@ export const calculateScenarioPnl = (
 export const applyTradesToPortfolio = (
     currentBonds: Bond[], 
     tradesToApply: ProposedTrade[],
-    bondMasterData: Record<string, BondStaticData>
+    bondMasterData: Record<string, BondStaticData>,
+    fxRates: FxRates
 ): Bond[] => {
     const newBondsMap = new Map<string, {notional: number, staticData: BondStaticData}>();
 
@@ -208,11 +206,14 @@ export const applyTradesToPortfolio = (
     // Convert map back to Bond array
     const bondsArray: Bond[] = Array.from(newBondsMap.entries()).map(([isin, {notional, staticData}]) => {
         const marketValue = notional * (staticData.price / 100);
+        const fxRate = fxRates[staticData.currency] || 1.0;
+        const marketValueUSD = marketValue * fxRate;
         return {
             ...staticData,
             isin,
             notional,
             marketValue,
+            marketValueUSD,
             portfolioWeight: 0,
             durationContribution: 0,
         }
