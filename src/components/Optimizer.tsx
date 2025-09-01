@@ -537,14 +537,9 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         );
     }, [portfolio.bonds, eligibilitySearch]);
     
-    const paramLabel = isTargetingMode ? 'Max Turnover (%)' : mode === 'buy-only' ? 'New Cash to Invest ($)' : mode === 'sell-only' ? 'Cash to Raise ($)' : 'Max Turnover (%)';
+    const paramLabel = mode === 'buy-only' ? 'New Cash to Invest ($)' : mode === 'sell-only' ? 'Cash to Raise ($)' : 'Max Turnover (%)';
 
     const handleParamChange = (value: string) => {
-        if (isTargetingMode) {
-             setMaxTurnover(value);
-             return;
-        }
-
         const numericValue = value.replace(/,/g, '');
         if (/^\d*$/.test(numericValue)) { // only allow digits
             if (mode === 'buy-only') {
@@ -560,7 +555,6 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     };
 
     const getParamValue = () => {
-        if (isTargetingMode) return maxTurnover;
         if (mode === 'buy-only') return displayNewCashToInvest;
         if (mode === 'sell-only') return displayCashToRaise;
         return maxTurnover;
@@ -606,11 +600,20 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                             <div className="border-t border-slate-800 my-4"></div>
 
                             <div>
+                                <label className="block text-sm font-medium text-slate-300">Optimisation Mode</label>
+                                <div className="mt-1 grid grid-cols-3 gap-2 p-1 bg-slate-800 rounded-lg">
+                                    <button onClick={() => setMode('switch')} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'switch' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Switch</button>
+                                    <button onClick={() => setMode('buy-only')} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'buy-only' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Buy Only</button>
+                                    <button onClick={() => setMode('sell-only')} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'sell-only' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Sell Only</button>
+                                </div>
+                            </div>
+                            
+                            <div>
                                 <label htmlFor="paramInput" className="block text-sm font-medium text-slate-300">
                                     {paramLabel}
                                 </label>
                                 <input 
-                                    type={mode === 'switch' || isTargetingMode ? 'number' : 'text'}
+                                    type={mode === 'switch' ? 'number' : 'text'}
                                     id="paramInput" 
                                     value={getParamValue()} 
                                     onChange={e => handleParamChange(e.target.value)} 
@@ -632,15 +635,6 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                     {ALL_RATINGS_ORDERED.map(r => r !== 'N/A' && <option key={r} value={r}>{r}</option>)}
                                 </select>
                                 <p className="text-xs text-slate-500 mt-1">Sets the minimum credit quality for any proposed buys.</p>
-                            </div>
-                            <div className={`${isTargetingMode ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                <label className="block text-sm font-medium text-slate-300">Optimisation Mode</label>
-                                <div className="mt-1 grid grid-cols-3 gap-2 p-1 bg-slate-800 rounded-lg">
-                                    <button onClick={() => setMode('switch')} disabled={isTargetingMode} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'switch' && !isTargetingMode ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'} disabled:bg-slate-700/50 disabled:text-slate-500`}>Switch</button>
-                                    <button onClick={() => setMode('buy-only')} disabled={isTargetingMode} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'buy-only' && !isTargetingMode ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'} disabled:bg-slate-700/50 disabled:text-slate-500`}>Buy Only</button>
-                                    <button onClick={() => setMode('sell-only')} disabled={isTargetingMode} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'sell-only' && !isTargetingMode ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'} disabled:bg-slate-700/50 disabled:text-slate-500`}>Sell Only</button>
-                                </div>
-                                {isTargetingMode && <p className="text-xs text-slate-500 mt-1">Targeting mode uses 'Switch' logic by default.</p>}
                             </div>
                         </div>
                     </Card>

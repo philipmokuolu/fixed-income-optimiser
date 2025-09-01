@@ -164,103 +164,235 @@ export const runOptimizer = (
     if (params.isTargetingMode && params.targetDurationGap !== undefined) {
         // --- STRATEGIC TARGETING MODE ---
         const targetGap = params.targetDurationGap;
-        let totalTradedValue = 0;
-        const maxTradeValue = (maxTurnover / 100) * initialPortfolio.totalMarketValue;
 
-        while (totalTradedValue < maxTradeValue && iterations < MAX_ITERATIONS) {
-            const currentDurationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
-            const currentDistance = Math.abs(currentDurationGap - targetGap);
+        if (mode === 'switch') {
+            let totalTradedValue = 0;
+            const maxTradeValue = (maxTurnover / 100) * initialPortfolio.totalMarketValue;
 
-            if (currentDistance < 0.01) {
-                finalHaltReason = `The duration gap target of ${formatNumber(targetGap)} years has been reached.`;
-                break;
-            }
+            while (totalTradedValue < maxTradeValue && iterations < MAX_ITERATIONS) {
+                const currentDurationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
+                const currentDistance = Math.abs(currentDurationGap - targetGap);
 
-            const sellableBonds = currentBonds.filter(b => !params.excludedBonds.includes(b.isin));
-            if (sellableBonds.length === 0 || buyUniverse.length === 0) {
-                finalHaltReason = "There were no eligible bonds available to sell or buy.";
-                break;
-            }
+                if (currentDistance < 0.01) {
+                    finalHaltReason = `The duration gap target of ${formatNumber(targetGap)} years has been reached.`;
+                    break;
+                }
 
-            let bestPair: { sell: ProposedTrade, buy: ProposedTrade, score: number } | null = null;
-            
-            const needsToIncreaseDuration = currentDurationGap < targetGap;
-            
-            const sellCandidates = [...sellableBonds].sort((a,b) => needsToIncreaseDuration ? a.modifiedDuration - b.modifiedDuration : b.modifiedDuration - a.modifiedDuration).slice(0, TOP_N_CANDIDATES);
-            const buyCandidates = [...buyUniverse].sort((a,b) => needsToIncreaseDuration ? b.modifiedDuration - a.modifiedDuration : a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
+                const sellableBonds = currentBonds.filter(b => !params.excludedBonds.includes(b.isin));
+                if (sellableBonds.length === 0 || buyUniverse.length === 0) {
+                    finalHaltReason = "There were no eligible bonds available to sell or buy.";
+                    break;
+                }
 
-            for (const sellBond of sellCandidates) {
-                for (const buyBond of buyCandidates) {
-                    const durationDiff = buyBond.modifiedDuration - sellBond.modifiedDuration;
-                    if ( (needsToIncreaseDuration && durationDiff <= 0) || (!needsToIncreaseDuration && durationDiff >= 0) ) {
-                        continue;
+                let bestPair: { sell: ProposedTrade, buy: ProposedTrade, score: number } | null = null;
+                
+                const needsToIncreaseDuration = currentDurationGap < targetGap;
+                
+                const sellCandidates = [...sellableBonds].sort((a,b) => needsToIncreaseDuration ? a.modifiedDuration - b.modifiedDuration : b.modifiedDuration - a.modifiedDuration).slice(0, TOP_N_CANDIDATES);
+                const buyCandidates = [...buyUniverse].sort((a,b) => needsToIncreaseDuration ? b.modifiedDuration - a.modifiedDuration : a.modifiedDuration - b.modifiedDuration).slice(0, TOP_N_CANDIDATES);
+
+                for (const sellBond of sellCandidates) {
+                    for (const buyBond of buyCandidates) {
+                        const durationDiff = buyBond.modifiedDuration - sellBond.modifiedDuration;
+                        if ( (needsToIncreaseDuration && durationDiff <= 0) || (!needsToIncreaseDuration && durationDiff >= 0) ) {
+                            continue;
+                        }
+                        
+                        const gapToClose = targetGap - currentDurationGap;
+                        const idealTradeMV = (gapToClose * currentPortfolio.totalMarketValue) / durationDiff;
+
+                        const maxAllowedTradeMV = Math.min(maxTradeValue - totalTradedValue, sellBond.marketValue);
+                        let tradeMarketValue = Math.min(Math.abs(idealTradeMV), maxAllowedTradeMV);
+
+                        const sellConstraints = getTradeConstraints(sellBond);
+                        const minSellNotionalAsMV = sellConstraints.minTradeSize * (sellBond.price / 100);
+                        const buyConstraints = getTradeConstraints(buyBond);
+                        const minBuyNotionalAsMV = buyConstraints.minTradeSize * (buyBond.price / 100);
+                        const minPracticalMV = Math.max(minSellNotionalAsMV, minBuyNotionalAsMV);
+
+                        if (minPracticalMV > maxAllowedTradeMV) continue;
+                        tradeMarketValue = Math.max(tradeMarketValue, minPracticalMV);
+                        
+                        if (tradeMarketValue <= 0) continue;
+
+                        let sellNotional = tradeMarketValue / (sellBond.price / 100);
+                        let buyNotional = tradeMarketValue / (buyBond.price / 100);
+                        sellNotional = Math.floor(sellNotional / sellConstraints.tradeIncrement) * sellConstraints.tradeIncrement;
+                        buyNotional = Math.floor(buyNotional / buyConstraints.tradeIncrement) * buyConstraints.tradeIncrement;
+
+                        if (sellNotional < sellConstraints.minTradeSize || buyNotional < buyConstraints.minTradeSize) continue;
+                        
+                        const sellTrade = createTradeObject('SELL', sellBond, sellNotional, pairIdCounter);
+                        const buyTrade = createTradeObject('BUY', buyBond, buyNotional, pairIdCounter);
+
+                        const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData, fxRates);
+                        const tempPortfolio = calculatePortfolioMetrics(tempBonds);
+                        const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
+                        const newDistance = Math.abs(newDurGap - targetGap);
+                        
+                        const distanceImprovement = currentDistance - newDistance;
+                        const teChange = calculateTrackingError(tempPortfolio, benchmark) - calculateTrackingError(currentPortfolio, benchmark);
+                        const yieldChange = tempPortfolio.averageYield - currentPortfolio.averageYield;
+                        
+                        const score = (1000 * distanceImprovement) + (5 * yieldChange) - (10 * teChange);
+                        if (isNaN(score)) continue;
+
+                        if (bestPair === null || score > bestPair.score) {
+                            bestPair = { sell: sellTrade, buy: buyTrade, score };
+                        }
                     }
+                }
+
+                if (bestPair && bestPair.score > 0) {
+                    const tradesForThisStep = [bestPair.sell, bestPair.buy];
+                    totalTradedValue += bestPair.sell.marketValue;
+                    proposedTrades.push(...tradesForThisStep);
                     
-                    const gapToClose = targetGap - currentDurationGap;
-                    const idealTradeMV = (gapToClose * currentPortfolio.totalMarketValue) / durationDiff;
+                    const newBonds = applyTradesToPortfolio(currentBonds, tradesForThisStep, bondMasterData, fxRates);
+                    currentPortfolio = calculatePortfolioMetrics(newBonds);
+                    currentBonds = currentPortfolio.bonds;
+                    
+                    buyUniverse = buyUniverse.filter(b => b.isin !== bestPair!.buy.isin);
+                    pairIdCounter++;
+                } else {
+                    finalHaltReason = "No further beneficial trades could be found to reach the target duration gap.";
+                    break;
+                }
+                iterations++;
+            }
+            if (totalTradedValue >= maxTradeValue) {
+                finalHaltReason = `The turnover limit of ${maxTurnover}% was reached.`;
+            }
+        }
+        else if (mode === 'buy-only') {
+            let cashToSpend = params.newCashToInvest ?? 0;
+            finalHaltReason = `The investment budget of ${formatCurrency(params.newCashToInvest ?? 0)} has been fully allocated.`;
 
-                    const maxAllowedTradeMV = Math.min(maxTradeValue - totalTradedValue, sellBond.marketValue);
-                    let tradeMarketValue = Math.min(Math.abs(idealTradeMV), maxAllowedTradeMV);
+            while (cashToSpend > MIN_TRADE_SIZE && iterations < MAX_ITERATIONS) {
+                const currentDurationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
+                const currentDistance = Math.abs(currentDurationGap - targetGap);
 
-                    const sellConstraints = getTradeConstraints(sellBond);
-                    const minSellNotionalAsMV = sellConstraints.minTradeSize * (sellBond.price / 100);
+                if (currentDistance < 0.01) {
+                    finalHaltReason = `The duration gap target of ${formatNumber(targetGap)} years has been reached.`;
+                    break;
+                }
+
+                if (buyUniverse.length === 0) {
+                    finalHaltReason = "There were no eligible bonds available to buy.";
+                    break;
+                }
+
+                let bestBuy: { trade: ProposedTrade, score: number } | null = null;
+                
+                for (const buyBond of buyUniverse) {
                     const buyConstraints = getTradeConstraints(buyBond);
-                    const minBuyNotionalAsMV = buyConstraints.minTradeSize * (buyBond.price / 100);
-                    const minPracticalMV = Math.max(minSellNotionalAsMV, minBuyNotionalAsMV);
+                    const isIG = (RATING_SCALE[buyBond.creditRating] ?? 99) <= RATING_SCALE['BBB-'];
+                    const concentrationLimitPercent = isIG ? 0.005 : 0.003;
+                    const maxMarketValueByConcentration = initialPortfolio.totalMarketValue * concentrationLimitPercent;
+                    const maxMarketValue = Math.min(cashToSpend, maxMarketValueByConcentration);
 
-                    if (minPracticalMV > maxAllowedTradeMV) continue;
-                    tradeMarketValue = Math.max(tradeMarketValue, minPracticalMV);
-                    
-                    if (tradeMarketValue <= 0) continue;
+                    let buyNotional = maxMarketValue / (buyBond.price / 100);
+                    if (buyNotional < buyConstraints.minTradeSize) continue;
 
-                    let sellNotional = tradeMarketValue / (sellBond.price / 100);
-                    let buyNotional = tradeMarketValue / (buyBond.price / 100);
-                    sellNotional = Math.floor(sellNotional / sellConstraints.tradeIncrement) * sellConstraints.tradeIncrement;
                     buyNotional = Math.floor(buyNotional / buyConstraints.tradeIncrement) * buyConstraints.tradeIncrement;
+                    if (buyNotional < buyConstraints.minTradeSize) continue;
 
-                    if (sellNotional < sellConstraints.minTradeSize || buyNotional < buyConstraints.minTradeSize) continue;
-                    
-                    const sellTrade = createTradeObject('SELL', sellBond, sellNotional, pairIdCounter);
                     const buyTrade = createTradeObject('BUY', buyBond, buyNotional, pairIdCounter);
-
-                    const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade, buyTrade], bondMasterData, fxRates);
+                    const tempBonds = applyTradesToPortfolio(currentBonds, [buyTrade], bondMasterData, fxRates);
                     const tempPortfolio = calculatePortfolioMetrics(tempBonds);
+                    
                     const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
                     const newDistance = Math.abs(newDurGap - targetGap);
                     
                     const distanceImprovement = currentDistance - newDistance;
-                    const teChange = calculateTrackingError(tempPortfolio, benchmark) - calculateTrackingError(currentPortfolio, benchmark);
                     const yieldChange = tempPortfolio.averageYield - currentPortfolio.averageYield;
-                    
-                    const score = (1000 * distanceImprovement) + (5 * yieldChange) - (10 * teChange);
+                    const score = (1000 * distanceImprovement) + (5 * yieldChange);
                     if (isNaN(score)) continue;
-
-                    if (bestPair === null || score > bestPair.score) {
-                        bestPair = { sell: sellTrade, buy: buyTrade, score };
+                    
+                    if (bestBuy === null || score > bestBuy.score) {
+                        bestBuy = { trade: buyTrade, score };
                     }
                 }
-            }
 
-            if (bestPair && bestPair.score > 0) {
-                const tradesForThisStep = [bestPair.sell, bestPair.buy];
-                totalTradedValue += bestPair.sell.marketValue;
-                proposedTrades.push(...tradesForThisStep);
-                
-                const newBonds = applyTradesToPortfolio(currentBonds, tradesForThisStep, bondMasterData, fxRates);
-                currentPortfolio = calculatePortfolioMetrics(newBonds);
-                currentBonds = currentPortfolio.bonds;
-                
-                buyUniverse = buyUniverse.filter(b => b.isin !== bestPair!.buy.isin);
-                pairIdCounter++;
-            } else {
-                finalHaltReason = "No further beneficial trades could be found to reach the target duration gap.";
-                break;
+                if (bestBuy && bestBuy.score > 0) {
+                    proposedTrades.push(bestBuy.trade);
+                    cashToSpend -= bestBuy.trade.marketValue;
+                    
+                    const newBonds = applyTradesToPortfolio(currentBonds, [bestBuy.trade], bondMasterData, fxRates);
+                    currentPortfolio = calculatePortfolioMetrics(newBonds);
+                    currentBonds = currentPortfolio.bonds;
+                    
+                    buyUniverse = buyUniverse.filter(b => b.isin !== bestBuy!.trade.isin);
+                    pairIdCounter++;
+                } else {
+                    finalHaltReason = "No further beneficial buy trades could be found to reach the target.";
+                    break;
+                }
+                iterations++;
             }
-            iterations++;
         }
-        if (totalTradedValue >= maxTradeValue) {
-            finalHaltReason = `The turnover limit of ${maxTurnover}% was reached.`;
+        else if (mode === 'sell-only') {
+            let cashRaised = 0;
+            const cashToRaise = params.cashToRaise ?? 0;
+            finalHaltReason = `The cash raising target of ${formatCurrency(cashToRaise)} was met.`;
+            
+            while (cashRaised < cashToRaise && iterations < MAX_ITERATIONS) {
+                const sellableBonds = currentBonds.filter(b => !params.excludedBonds.includes(b.isin));
+                if (sellableBonds.length === 0) {
+                    finalHaltReason = "No more bonds were available to sell.";
+                    break;
+                }
+        
+                const currentDurationGap = currentPortfolio.modifiedDuration - benchmark.modifiedDuration;
+                const currentDistance = Math.abs(currentDurationGap - targetGap);
+                
+                let bestSell: { trade: ProposedTrade, score: number } | null = null;
+                
+                for (const sellBond of sellableBonds) {
+                    const cashStillNeeded = cashToRaise - cashRaised;
+                    const maxSellMV = Math.min(sellBond.marketValue, cashStillNeeded);
+                    
+                    let sellNotional = maxSellMV / (sellBond.price / 100);
+                    const sellConstraints = getTradeConstraints(sellBond);
+                    
+                    if (sellNotional < sellConstraints.minTradeSize) continue;
+                    sellNotional = Math.floor(sellNotional / sellConstraints.tradeIncrement) * sellConstraints.tradeIncrement;
+                    if (sellNotional < sellConstraints.minTradeSize) continue;
+        
+                    const sellTrade = createTradeObject('SELL', sellBond, sellNotional, pairIdCounter);
+                    const tempBonds = applyTradesToPortfolio(currentBonds, [sellTrade], bondMasterData, fxRates);
+                    const tempPortfolio = calculatePortfolioMetrics(tempBonds);
+        
+                    const newDurGap = tempPortfolio.modifiedDuration - benchmark.modifiedDuration;
+                    const newDistance = Math.abs(newDurGap - targetGap);
+
+                    // Score is how much closer we get to the target.
+                    const distanceImprovement = currentDistance - newDistance;
+                    const score = distanceImprovement;
+                    if (isNaN(score)) continue;
+        
+                    if (bestSell === null || score > bestSell.score) {
+                        bestSell = { trade: sellTrade, score };
+                    }
+                }
+                
+                if (bestSell) {
+                    proposedTrades.push(bestSell.trade);
+                    cashRaised += bestSell.trade.marketValue;
+        
+                    const newBonds = applyTradesToPortfolio(currentBonds, [bestSell.trade], bondMasterData, fxRates);
+                    currentPortfolio = calculatePortfolioMetrics(newBonds);
+                    currentBonds = currentPortfolio.bonds;
+        
+                    pairIdCounter++;
+                } else {
+                    finalHaltReason = "No further sell trades could be found that also improve the duration target.";
+                    break;
+                }
+                iterations++;
+            }
         }
+
     } else {
         // --- RISK REDUCTION MODE (Existing Logic) ---
         const wasInitiallyInBreach = getDurationBreachDistance(beforeMetrics.durationGap, params.maxDurationShortfall, params.maxDurationSurplus) > 0;
