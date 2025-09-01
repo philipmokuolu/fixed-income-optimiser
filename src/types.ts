@@ -90,7 +90,7 @@ export interface OptimizationParams {
   cashToRaise?: number;
   newCashToInvest?: number;
   // New strategic targeting params
-  isTargetingMode?: boolean;
+  isTargetingMode: boolean;
   targetDurationGap?: number;
 }
 

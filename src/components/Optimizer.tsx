@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-// FIX: Import FxRates type
 import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData, AppSettings, ProposedTrade, Portfolio as PortfolioType, KRD_TENORS, KrdKey, Bond, FxRates } from '@/types';
 import { Card } from '@/components/shared/Card';
 import * as optimizerService from '@/services/optimizerService';
@@ -346,9 +345,30 @@ interface OptimiserProps {
     benchmark: Benchmark;
     bondMasterData: Record<string, BondStaticData>;
     appSettings: AppSettings;
-    // FIX: Add fxRates to props
     fxRates: FxRates;
 }
+
+const ToggleSwitch: React.FC<{ enabled: boolean; onChange: (enabled: boolean) => void; }> = ({ enabled, onChange }) => {
+    return (
+        <button
+            type="button"
+            className={`${
+                enabled ? 'bg-green-600' : 'bg-slate-700'
+            } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-slate-900`}
+            role="switch"
+            aria-checked={enabled}
+            onClick={() => onChange(!enabled)}
+        >
+            <span
+                aria-hidden="true"
+                className={`${
+                    enabled ? 'translate-x-5' : 'translate-x-0'
+                } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
+            />
+        </button>
+    );
+};
+
 
 export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bondMasterData, appSettings, fxRates }) => {
     // Raw numeric string state
@@ -368,6 +388,11 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     // New constraints state
     const [investmentHorizonLimit, setInvestmentHorizonLimit] = useState(() => sessionStorage.getItem('optimiser_horizonLimit') || '10');
     const [minimumPurchaseRating, setMinimumPurchaseRating] = useState(() => sessionStorage.getItem('optimiser_minRating') || 'BB-');
+
+    // Strategic Targeting State
+    const [isTargetingMode, setIsTargetingMode] = useState(() => sessionStorage.getItem('optimiser_isTargetingMode') === 'true' || false);
+    const [targetDurationGap, setTargetDurationGap] = useState(() => sessionStorage.getItem('optimiser_targetDurationGap') || '0.0');
+
 
     const [result, setResult] = useState<OptimizationResult | null>(() => {
         try {
@@ -390,13 +415,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         return isNaN(num) ? '' : num.toLocaleString();
     };
     
-    useEffect(() => {
-        setDisplayCashToRaise(formatForDisplay(cashToRaise));
-    }, [cashToRaise]);
-
-    useEffect(() => {
-        setDisplayNewCashToInvest(formatForDisplay(newCashToInvest));
-    }, [newCashToInvest]);
+    useEffect(() => { setDisplayCashToRaise(formatForDisplay(cashToRaise)); }, [cashToRaise]);
+    useEffect(() => { setDisplayNewCashToInvest(formatForDisplay(newCashToInvest)); }, [newCashToInvest]);
     
     useEffect(() => { sessionStorage.setItem('optimiser_maxTurnover', maxTurnover); }, [maxTurnover]);
     useEffect(() => { sessionStorage.setItem('optimiser_cashToRaise', cashToRaise); }, [cashToRaise]);
@@ -404,6 +424,9 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     useEffect(() => { sessionStorage.setItem('optimiser_transactionCost', transactionCost); }, [transactionCost]);
     useEffect(() => { sessionStorage.setItem('optimiser_horizonLimit', investmentHorizonLimit); }, [investmentHorizonLimit]);
     useEffect(() => { sessionStorage.setItem('optimiser_minRating', minimumPurchaseRating); }, [minimumPurchaseRating]);
+    useEffect(() => { sessionStorage.setItem('optimiser_isTargetingMode', String(isTargetingMode)); }, [isTargetingMode]);
+    useEffect(() => { sessionStorage.setItem('optimiser_targetDurationGap', targetDurationGap); }, [targetDurationGap]);
+
     useEffect(() => {
         if (result) sessionStorage.setItem('optimiser_result', JSON.stringify(result));
         else sessionStorage.removeItem('optimiser_result');
@@ -430,13 +453,14 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                     minimumPurchaseRating: minimumPurchaseRating,
                     cashToRaise: mode === 'sell-only' ? Number(cashToRaise) : undefined,
                     newCashToInvest: mode === 'buy-only' ? Number(newCashToInvest) : undefined,
+                    isTargetingMode,
+                    targetDurationGap: isTargetingMode ? Number(targetDurationGap) : undefined
                 };
 
-                if (isNaN(params.maxTurnover) || isNaN(params.transactionCost) || isNaN(params.investmentHorizonLimit) || (params.cashToRaise && isNaN(params.cashToRaise)) || (params.newCashToInvest && isNaN(params.newCashToInvest))) {
+                if (isNaN(params.maxTurnover) || isNaN(params.transactionCost) || isNaN(params.investmentHorizonLimit) || (params.cashToRaise && isNaN(params.cashToRaise)) || (params.newCashToInvest && isNaN(params.newCashToInvest)) || (params.isTargetingMode && isNaN(params.targetDurationGap as number))) {
                     throw new Error("One of the input parameters is not a valid number.");
                 }
 
-                // FIX: Pass fxRates to the optimizer service.
                 const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData, fxRates);
                 
                 if (!optoResult) {
@@ -452,8 +476,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                 setIsLoading(false);
             }
         }, 500); // simulate async work
-    // FIX: Add fxRates to the dependency array.
-    }, [maxTurnover, cashToRaise, newCashToInvest, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, portfolio, benchmark, bondMasterData, appSettings, fxRates]);
+    }, [maxTurnover, cashToRaise, newCashToInvest, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, isTargetingMode, targetDurationGap, portfolio, benchmark, bondMasterData, appSettings, fxRates]);
     
     const handleResetOptimiser = () => {
         setResult(null);
@@ -490,7 +513,6 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             }
         }
         
-        // FIX: Pass fxRates to applyTradesToPortfolio.
         const afterPortfolioBonds = applyTradesToPortfolio(portfolio.bonds, activeProposedTrades, bondMasterData, fxRates);
         const afterPortfolio = calculatePortfolioMetrics(afterPortfolioBonds);
         
@@ -506,7 +528,6 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
             activeSpreadCost,
             activeAggregateFeeBps
         }
-    // FIX: Add fxRates to the dependency array.
     }, [result, activeTrades, portfolio, bondMasterData, transactionCost, mode, fxRates]);
 
     const filteredEligibilityBonds = useMemo(() => {
@@ -516,9 +537,14 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         );
     }, [portfolio.bonds, eligibilitySearch]);
     
-    const paramLabel = mode === 'buy-only' ? 'New Cash to Invest ($)' : mode === 'sell-only' ? 'Cash to Raise ($)' : 'Max Turnover (%)';
+    const paramLabel = isTargetingMode ? 'Max Turnover (%)' : mode === 'buy-only' ? 'New Cash to Invest ($)' : mode === 'sell-only' ? 'Cash to Raise ($)' : 'Max Turnover (%)';
 
     const handleParamChange = (value: string) => {
+        if (isTargetingMode) {
+             setMaxTurnover(value);
+             return;
+        }
+
         const numericValue = value.replace(/,/g, '');
         if (/^\d*$/.test(numericValue)) { // only allow digits
             if (mode === 'buy-only') {
@@ -534,10 +560,18 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     };
 
     const getParamValue = () => {
+        if (isTargetingMode) return maxTurnover;
         if (mode === 'buy-only') return displayNewCashToInvest;
         if (mode === 'sell-only') return displayCashToRaise;
         return maxTurnover;
     };
+
+    const handleTargetGapChange = (value: string) => {
+        // Allow negative sign and one decimal point
+        if (/^-?\d*\.?\d*$/.test(value)) {
+            setTargetDurationGap(value);
+        }
+    }
 
     return (
         <div className="p-4 sm:p-6 lg:p-8 space-y-6">
@@ -547,12 +581,36 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                     <Card>
                         <h3 className="text-lg font-semibold text-slate-200 mb-4">Setup & Constraints</h3>
                         <div className="space-y-4">
+                            <div className="flex justify-between items-center bg-slate-800/50 p-3 rounded-lg">
+                                <div>
+                                    <label htmlFor="targeting-toggle" className="font-semibold text-slate-100">Strategic Duration Targeting</label>
+                                    <p className="text-xs text-slate-400">Target a specific duration gap instead of just reducing risk.</p>
+                                </div>
+                                <ToggleSwitch enabled={isTargetingMode} onChange={setIsTargetingMode} />
+                            </div>
+
+                             <div className={`transition-opacity duration-300 ${isTargetingMode ? 'opacity-100' : 'opacity-50'}`}>
+                                <label htmlFor="targetDurationGap" className="block text-sm font-medium text-slate-300">
+                                    Target Duration Gap (yrs)
+                                </label>
+                                <input 
+                                    type="text"
+                                    id="targetDurationGap" 
+                                    value={targetDurationGap} 
+                                    onChange={e => handleTargetGapChange(e.target.value)} 
+                                    className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none disabled:bg-slate-800/50 disabled:cursor-not-allowed"
+                                    disabled={!isTargetingMode}
+                                />
+                            </div>
+
+                            <div className="border-t border-slate-800 my-4"></div>
+
                             <div>
                                 <label htmlFor="paramInput" className="block text-sm font-medium text-slate-300">
                                     {paramLabel}
                                 </label>
                                 <input 
-                                    type={mode === 'switch' ? 'number' : 'text'}
+                                    type={mode === 'switch' || isTargetingMode ? 'number' : 'text'}
                                     id="paramInput" 
                                     value={getParamValue()} 
                                     onChange={e => handleParamChange(e.target.value)} 
@@ -575,13 +633,14 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                 </select>
                                 <p className="text-xs text-slate-500 mt-1">Sets the minimum credit quality for any proposed buys.</p>
                             </div>
-                            <div>
+                            <div className={`${isTargetingMode ? 'opacity-50 cursor-not-allowed' : ''}`}>
                                 <label className="block text-sm font-medium text-slate-300">Optimisation Mode</label>
                                 <div className="mt-1 grid grid-cols-3 gap-2 p-1 bg-slate-800 rounded-lg">
-                                    <button onClick={() => setMode('switch')} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'switch' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Switch</button>
-                                    <button onClick={() => setMode('buy-only')} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'buy-only' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Buy Only</button>
-                                    <button onClick={() => setMode('sell-only')} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'sell-only' ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Sell Only</button>
+                                    <button onClick={() => setMode('switch')} disabled={isTargetingMode} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'switch' && !isTargetingMode ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'} disabled:bg-slate-700/50 disabled:text-slate-500`}>Switch</button>
+                                    <button onClick={() => setMode('buy-only')} disabled={isTargetingMode} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'buy-only' && !isTargetingMode ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'} disabled:bg-slate-700/50 disabled:text-slate-500`}>Buy Only</button>
+                                    <button onClick={() => setMode('sell-only')} disabled={isTargetingMode} className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${mode === 'sell-only' && !isTargetingMode ? 'bg-orange-600 text-white' : 'text-slate-300 hover:bg-slate-700'} disabled:bg-slate-700/50 disabled:text-slate-500`}>Sell Only</button>
                                 </div>
+                                {isTargetingMode && <p className="text-xs text-slate-500 mt-1">Targeting mode uses 'Switch' logic by default.</p>}
                             </div>
                         </div>
                     </Card>
