@@ -62,7 +62,6 @@ export const parseCsvToJson = <T>(
                 return reject(new Error("CSV must contain a header row and at least one data row."));
             }
             
-            // A bug in some CSV exports includes a BOM character at the start of the file.
             const cleanHeaderLine = lines[0].replace(/^\uFEFF/, '');
             const fileHeaders = cleanHeaderLine.split(',').map(h => h.trim());
             
@@ -78,40 +77,34 @@ export const parseCsvToJson = <T>(
 
             const jsonResult: T[] = [];
             
-            // Expanded list of common error prefixes for more robust parsing
-            const errorPrefixes = [
-                '#N/A', '#VALUE!', '#REF!', '#DIV/0!', '#NUM!', '#NAME?', '#NULL!',
-            ];
-
             for (let i = 1; i < lines.length; i++) {
                 const values = parseCsvLine(lines[i]);
                 const obj: any = {};
                 
                 for (const expectedKey of expectedHeaders) {
                     const index = headerIndexMap[expectedKey.toLowerCase()];
+                    // FIX: Moved isNumericColumn declaration to be accessible in the else block.
+                    const isNumericColumn = !['isin', 'name', 'currency', 'maturitydate', 'creditrating'].includes(expectedKey.toLowerCase());
 
                     if (index !== undefined && index < values.length) { 
-                        let value = values[index]?.trim() || '';
-                        const upperValue = value.toUpperCase();
+                        const value = (values[index] || '');
                         
-                        // Check if the value starts with any of the known error strings
-                        const isErrorString = errorPrefixes.some(prefix => upperValue.startsWith(prefix));
-                        const isNumericColumn = !['isin', 'name', 'currency', 'maturitydate', 'creditrating'].includes(expectedKey.toLowerCase());
-                        
-                        if (isErrorString && isNumericColumn) {
-                            obj[expectedKey] = 0;
+                        if (isNumericColumn) {
+                            // For numeric columns, attempt to parse. If it fails for any reason, default to 0.
+                            // This robustly handles all error strings, text, hyphens, invisible characters, etc.
+                            // 1. Replace non-breaking spaces (a common invisible issue) with regular spaces.
+                            // 2. Trim standard whitespace from the ends.
+                            // 3. Remove thousands-separator commas.
+                            const cleanedValue = value.replace(/\u00A0/g, ' ').trim().replace(/,/g, '');
+                            const num = parseFloat(cleanedValue);
+                            obj[expectedKey] = isNaN(num) ? 0 : num;
                         } else {
-                             // Clean value for numeric conversion by removing commas
-                            const cleanedForNumber = value.replace(/,/g, '');
-                            if (isNumericColumn && cleanedForNumber.trim() !== '' && !isNaN(Number(cleanedForNumber))) {
-                                obj[expectedKey] = Number(cleanedForNumber);
-                            } else {
-                                obj[expectedKey] = value;
-                            }
+                            // For string columns, just trim whitespace.
+                            obj[expectedKey] = value.trim();
                         }
                     } else {
                         // If a column is missing for a row, assign a safe default
-                        obj[expectedKey] = 0;
+                        obj[expectedKey] = isNumericColumn ? 0 : '';
                     }
                 }
                 jsonResult.push(obj as T);
