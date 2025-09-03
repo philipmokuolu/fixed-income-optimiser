@@ -44,7 +44,7 @@ export const buildBenchmark = (
     const krdKey: KrdKey = `krd_${tenor}`;
     acc[krdKey] = benchmarkHoldings.reduce((sum, holding) => {
         const staticData = bondMasterData[holding.isin];
-        if (staticData && staticData[krdKey] && holding.weight) {
+        if (staticData && typeof staticData[krdKey] === 'number' && typeof holding.weight === 'number') {
             return sum + staticData[krdKey] * holding.weight;
         }
         return sum;
@@ -72,16 +72,18 @@ export const calculateTrackingError = (portfolio: KRDFields, benchmark: KRDField
 };
 
 export const calculatePortfolioMetrics = (bonds: Bond[]): Portfolio => {
+  const warnings: string[] = [];
   const totalMarketValue = bonds.reduce((sum, bond) => sum + bond.marketValueUSD, 0);
 
-  if (totalMarketValue === 0) {
-    const zeroKRDs = KRD_TENORS.reduce((acc, tenor) => ({ ...acc, [`krd_${tenor}`]: 0 }), {} as KRDFields);
+  const zeroKRDs = KRD_TENORS.reduce((acc, tenor) => ({ ...acc, [`krd_${tenor}`]: 0 }), {} as KRDFields);
 
+  if (totalMarketValue === 0) {
     return {
       bonds: [],
       totalMarketValue: 0,
       modifiedDuration: 0,
       averageYield: 0,
+      warnings: bonds.length > 0 ? ["Portfolio market value is zero."] : [],
       ...zeroKRDs,
     };
   }
@@ -98,13 +100,26 @@ export const calculatePortfolioMetrics = (bonds: Bond[]): Portfolio => {
 
   const weight = (bond: Bond) => bond.portfolioWeight;
 
-  const modifiedDuration = bondsWithMetrics.reduce((sum, bond) => sum + bond.modifiedDuration * weight(bond), 0);
+  let modifiedDuration = bondsWithMetrics.reduce((sum, bond) => sum + (bond.modifiedDuration || 0) * weight(bond), 0);
+  if (isNaN(modifiedDuration)) {
+      warnings.push("Portfolio Duration could not be calculated due to invalid non-numeric data in the 'modifiedDuration' column of the Bond Master file.");
+      modifiedDuration = 0;
+  }
   
-  const averageYield = bondsWithMetrics.reduce((sum, bond) => sum + bond.yieldToMaturity * weight(bond), 0);
+  let averageYield = bondsWithMetrics.reduce((sum, bond) => sum + (bond.yieldToMaturity || 0) * weight(bond), 0);
+  if (isNaN(averageYield)) {
+      warnings.push("Portfolio Yield could not be calculated due to invalid non-numeric data in the 'yieldToMaturity' column of the Bond Master file.");
+      averageYield = 0;
+  }
   
   const krd = KRD_TENORS.reduce((acc, tenor) => {
     const krdKey: KrdKey = `krd_${tenor}`;
-    acc[krdKey] = bondsWithMetrics.reduce((sum, bond) => sum + bond[krdKey] * weight(bond), 0);
+    let krdValue = bondsWithMetrics.reduce((sum, bond) => sum + (bond[krdKey] || 0) * weight(bond), 0);
+    if (isNaN(krdValue)) {
+        warnings.push(`KRD for tenor '${tenor}' could not be calculated due to invalid non-numeric data in the '${krdKey}' column of the Bond Master file.`);
+        krdValue = 0;
+    }
+    acc[krdKey] = krdValue;
     return acc;
   }, {} as KRDFields);
 
@@ -113,6 +128,7 @@ export const calculatePortfolioMetrics = (bonds: Bond[]): Portfolio => {
       totalMarketValue, 
       modifiedDuration,
       averageYield,
+      warnings: warnings.length > 0 ? warnings : undefined,
       ...krd,
     };
 };

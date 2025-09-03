@@ -77,10 +77,13 @@ export const parseCsvToJson = <T>(
             }
 
             const jsonResult: T[] = [];
-            const errorStrings = new Set(['#N/A', '#VALUE!', '#REF!', '#DIV/0!', '#NUM!', '#NAME?', '#NULL!']);
+            
+            // Expanded list of common error prefixes for more robust parsing
+            const errorPrefixes = [
+                '#N/A', '#VALUE!', '#REF!', '#DIV/0!', '#NUM!', '#NAME?', '#NULL!',
+            ];
 
             for (let i = 1; i < lines.length; i++) {
-                // Use a robust CSV line parser that handles quoted fields
                 const values = parseCsvLine(lines[i]);
                 const obj: any = {};
                 
@@ -89,20 +92,26 @@ export const parseCsvToJson = <T>(
 
                     if (index !== undefined && index < values.length) { 
                         let value = values[index]?.trim() || '';
-
-                        const isErrorString = errorStrings.has(value.toUpperCase());
-                        const isMaturityDateColumn = expectedKey.toLowerCase() === 'maturitydate';
+                        const upperValue = value.toUpperCase();
                         
-                        // Clean value for numeric conversion by removing commas
-                        const cleanedForNumber = value.replace(/,/g, '');
-
-                        if (isErrorString) {
-                            obj[expectedKey] = isMaturityDateColumn ? "N/A" : 0;
-                        } else if (!isMaturityDateColumn && cleanedForNumber.trim() !== '' && !isNaN(Number(cleanedForNumber))) {
-                            obj[expectedKey] = Number(cleanedForNumber);
+                        // Check if the value starts with any of the known error strings
+                        const isErrorString = errorPrefixes.some(prefix => upperValue.startsWith(prefix));
+                        const isNumericColumn = !['isin', 'name', 'currency', 'maturitydate', 'creditrating'].includes(expectedKey.toLowerCase());
+                        
+                        if (isErrorString && isNumericColumn) {
+                            obj[expectedKey] = 0;
                         } else {
-                            obj[expectedKey] = value;
+                             // Clean value for numeric conversion by removing commas
+                            const cleanedForNumber = value.replace(/,/g, '');
+                            if (isNumericColumn && cleanedForNumber.trim() !== '' && !isNaN(Number(cleanedForNumber))) {
+                                obj[expectedKey] = Number(cleanedForNumber);
+                            } else {
+                                obj[expectedKey] = value;
+                            }
                         }
+                    } else {
+                        // If a column is missing for a row, assign a safe default
+                        obj[expectedKey] = 0;
                     }
                 }
                 jsonResult.push(obj as T);
