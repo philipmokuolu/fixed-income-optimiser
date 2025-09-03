@@ -9,6 +9,15 @@ interface DataHubProps {
     onDataUploaded: () => void;
 }
 
+const formatTimestamp = (isoString: string | null): string | undefined => {
+    if (!isoString) return undefined;
+    try {
+        return new Date(isoString).toLocaleString();
+    } catch (e) {
+        return undefined;
+    }
+}
+
 export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
     const [benchmarkAggregate, setBenchmarkAggregate] = useState<BenchmarkAggregate | null>(null);
     const [bmDurationStr, setBmDurationStr] = useState('');
@@ -18,6 +27,20 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
     const [bmStatus, setBmStatus] = useState('');
     const [settingsStatus, setSettingsStatus] = useState('');
     const [fxStatus, setFxStatus] = useState('');
+    
+    const [timestamps, setTimestamps] = useState({
+        holdings: '',
+        bondMaster: '',
+        benchmarkHoldings: '',
+    });
+
+    const loadTimestamps = useCallback(() => {
+        setTimestamps({
+            holdings: formatTimestamp(dataService.loadTimestamp('FIPO_PORTFOLIO_HOLDINGS_TS')) || 'Using default sample data',
+            bondMaster: formatTimestamp(dataService.loadTimestamp('FIPO_BOND_MASTER_DATA_TS')) || 'Using default sample data',
+            benchmarkHoldings: formatTimestamp(dataService.loadTimestamp('FIPO_BENCHMARK_HOLDINGS_TS')) || 'Using default sample data',
+        });
+    }, []);
 
     useEffect(() => {
         const loadedBenchmark = dataService.loadBenchmarkAggregate();
@@ -28,7 +51,8 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
         setBmDurationStr(String(loadedBenchmark.modifiedDuration));
         setAppSettings(loadedSettings);
         setFxRates(loadedFxRates);
-    }, []);
+        loadTimestamps();
+    }, [loadTimestamps]);
 
     const detectedCurrencies = useMemo(() => {
         const holdings = dataService.loadPortfolioHoldings();
@@ -41,13 +65,18 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
             }
         });
         return Array.from(currencies);
-    }, [onDataUploaded]); // Re-run when data changes
+    }, []); // Removed onDataUploaded dependency
 
+    const handleDataUpdate = useCallback(() => {
+        onDataUploaded();
+        loadTimestamps();
+    }, [onDataUploaded, loadTimestamps]);
+    
     const handleHoldingsUpload = async (file: File) => {
         const expectedHeaders = ['isin', 'notional'];
         const holdingsJson = await parseCsvToJson<PortfolioHolding>(file, expectedHeaders);
         dataService.savePortfolioHoldings(holdingsJson);
-        onDataUploaded();
+        handleDataUpdate();
     };
 
     const handleBondMasterUpload = async (file: File) => {
@@ -63,15 +92,23 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
         }, {} as Record<string, BondStaticData>);
 
         dataService.saveBondMasterData(bondMasterRecord);
-        onDataUploaded();
+        handleDataUpdate();
     };
 
     const handleBenchmarkHoldingsUpload = async (file: File) => {
         const expectedHeaders = ['isin', 'weight'];
         const benchmarkHoldingsJson = await parseCsvToJson<BenchmarkHolding>(file, expectedHeaders);
         dataService.saveBenchmarkHoldings(benchmarkHoldingsJson);
-        onDataUploaded();
+        handleDataUpdate();
     };
+    
+    const handleClearCache = () => {
+        if (window.confirm("Are you sure you want to clear all cached data? This will reset the application to its default state.")) {
+            dataService.clearAllData();
+            handleDataUpdate();
+        }
+    };
+
 
     const handleAggregateChange = (field: keyof Omit<BenchmarkAggregate, 'modifiedDuration'>, value: string) => {
         if (benchmarkAggregate) {
@@ -145,12 +182,14 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
                     description="Your current portfolio positions."
                     expectedColumns={['isin', 'notional']}
                     onFileUpload={handleHoldingsUpload}
+                    lastUpdated={timestamps.holdings}
                 />
                 <FileUploadCard
                     title="2. Bond Master & Universe"
                     description="Static and market data for all bonds in your portfolio AND any off-benchmark bonds for the Optimiser."
                     expectedColumns={['isin', 'name', 'price', 'modifiedDuration', 'bidAskSpread', 'minTradeSize', 'tradeIncrement', '...etc']}
                     onFileUpload={handleBondMasterUpload}
+                    lastUpdated={timestamps.bondMaster}
                 />
                  <Card>
                     <h3 className="text-lg font-semibold text-slate-200">3. Benchmark Configuration</h3>
@@ -183,6 +222,7 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
                             description="For KRD calculations."
                             expectedColumns={['isin', 'weight']}
                             onFileUpload={handleBenchmarkHoldingsUpload}
+                            lastUpdated={timestamps.benchmarkHoldings}
                         />
                     </div>
                  </Card>
@@ -249,6 +289,13 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
                             {settingsStatus && <p className="text-green-400 text-xs text-center mt-2">{settingsStatus}</p>}
                          </div>
                      )}
+                 </Card>
+                 <Card>
+                     <h3 className="text-lg font-semibold text-slate-200">Reset Application</h3>
+                     <p className="text-sm text-slate-400 mt-1 mb-4">If the app is behaving unexpectedly, you can clear all locally cached data. This will reset the app to its default sample data.</p>
+                     <button onClick={handleClearCache} className="w-full bg-red-800 text-white font-bold py-2 px-4 rounded-md hover:bg-red-900 transition-colors text-sm">
+                        Clear All Cached Data
+                     </button>
                  </Card>
             </div>
         </div>

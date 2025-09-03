@@ -6,6 +6,7 @@ interface FileUploadCardProps {
     description: string;
     expectedColumns: string[];
     onFileUpload: (file: File) => Promise<void>;
+    lastUpdated?: string;
 }
 
 type Status = 'idle' | 'processing' | 'success' | 'error';
@@ -16,7 +17,7 @@ const UploadIcon: React.FC = () => (
     </svg>
 );
 
-export const FileUploadCard: React.FC<FileUploadCardProps> = ({ title, description, expectedColumns, onFileUpload }) => {
+export const FileUploadCard: React.FC<FileUploadCardProps> = ({ title, description, expectedColumns, onFileUpload, lastUpdated }) => {
     const [status, setStatus] = useState<Status>('idle');
     const [message, setMessage] = useState('Drag & drop your CSV file here, or click to select.');
     const [isDragOver, setIsDragOver] = useState(false);
@@ -69,8 +70,14 @@ export const FileUploadCard: React.FC<FileUploadCardProps> = ({ title, descripti
 
     return (
         <Card className="flex flex-col">
-            <h3 className="text-lg font-semibold text-slate-200">{title}</h3>
-            <p className="text-sm text-slate-400 mt-1">{description}</p>
+            <div className="flex justify-between items-start">
+                <h3 className="text-lg font-semibold text-slate-200">{title}</h3>
+                {lastUpdated && <span className="text-xs text-slate-500 whitespace-nowrap">Last updated:</span>}
+            </div>
+             <div className="flex justify-between items-start">
+                <p className="text-sm text-slate-400 mt-1">{description}</p>
+                 {lastUpdated && <span className="text-xs text-slate-400 text-right">{lastUpdated}</span>}
+            </div>
             <div className="text-xs text-slate-500 bg-slate-950 p-2 rounded-md mt-3">
                 <span className="font-semibold">Expected Columns:</span> {expectedColumns.join(', ')}
             </div>

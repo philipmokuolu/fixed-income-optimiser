@@ -204,6 +204,7 @@ const ResultsDisplay: React.FC<{
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">ISIN</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Name</th>
                                     <th className="px-2 py-2 text-center text-xs font-medium text-slate-400 uppercase">Rating</th>
+                                    <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Mod.Dur</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Notional</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Yield (%)</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">M.Val</th>
@@ -218,6 +219,7 @@ const ResultsDisplay: React.FC<{
                                         <td className="px-2 py-2 text-sm font-mono text-orange-400">{trade.isin}</td>
                                         <td className="px-2 py-2 text-sm max-w-xs truncate">{trade.name}</td>
                                         <td className="px-2 py-2 text-sm text-center font-mono">{trade.creditRating}</td>
+                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.modifiedDuration, {minimumFractionDigits: 2})}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.notional, 0, 0)}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.yieldToMaturity, {minimumFractionDigits: 2})}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.marketValue, 0, 0)}</td>
@@ -382,7 +384,14 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     const [displayNewCashToInvest, setDisplayNewCashToInvest] = useState('');
 
     const [mode, setMode] = useState<'switch' | 'buy-only' | 'sell-only'>('switch');
-    const [excludedBonds, setExcludedBonds] = useState<string[]>([]);
+    const [excludedBonds, setExcludedBonds] = useState<string[]>(() => {
+        try {
+            const saved = sessionStorage.getItem('optimiser_excludedBonds');
+            return saved ? JSON.parse(saved) : [];
+        } catch (e) {
+            return [];
+        }
+    });
     const [eligibilitySearch, setEligibilitySearch] = useState('');
     
     // New constraints state
@@ -426,6 +435,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     useEffect(() => { sessionStorage.setItem('optimiser_minRating', minimumPurchaseRating); }, [minimumPurchaseRating]);
     useEffect(() => { sessionStorage.setItem('optimiser_isTargetingMode', String(isTargetingMode)); }, [isTargetingMode]);
     useEffect(() => { sessionStorage.setItem('optimiser_targetDurationGap', targetDurationGap); }, [targetDurationGap]);
+    useEffect(() => { sessionStorage.setItem('optimiser_excludedBonds', JSON.stringify(excludedBonds)); }, [excludedBonds]);
+
 
     useEffect(() => {
         if (result) sessionStorage.setItem('optimiser_result', JSON.stringify(result));
