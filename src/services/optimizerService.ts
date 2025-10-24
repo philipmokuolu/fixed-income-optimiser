@@ -142,8 +142,10 @@ export const runOptimizer = (
             if (yearsToMaturity > params.investmentHorizonLimit) return false;
             
             const minRatingValue = RATING_SCALE[params.minimumPurchaseRating] ?? 99;
+            const maxRatingValue = RATING_SCALE[params.maximumPurchaseRating] ?? 1;
             const bondRatingValue = RATING_SCALE[bond.creditRating] ?? 99;
-            return bondRatingValue <= minRatingValue;
+            
+            return bondRatingValue >= maxRatingValue && bondRatingValue <= minRatingValue;
         });
     
     const emptyResult = (rationale: string) => ({
@@ -689,7 +691,7 @@ export const runOptimizer = (
 
     // --- 3. FINALIZATION ---
     if (proposedTrades.length === 0) {
-        return emptyResult("The optimizer determined that the portfolio is already optimal given the specified constraints, or no suitable trades could be found in the bond universe to improve it.");
+        return emptyResult("The optimiser determined that the portfolio is already optimal given the specified constraints, or no suitable trades could be found in the bond universe to improve it.");
     }
     
     const finalPortfolio = calculatePortfolioMetrics(currentBonds);
@@ -700,7 +702,7 @@ export const runOptimizer = (
     const estimatedSpreadCost = proposedTrades.reduce((sum, trade) => sum + trade.spreadCost, 0);
     const estimatedCost = estimatedFeeCost + estimatedSpreadCost;
 
-    let summaryRationale = `The optimizer successfully identified ${proposedTrades.length} trade(s) over ${iterations} iteration(s).\n\n`;
+    let summaryRationale = `The optimiser successfully identified ${proposedTrades.length} trade(s) over ${iterations} iteration(s).\n\n`;
     if(params.isTargetingMode) {
         summaryRationale += `The objective was to reach a target duration gap of ${formatNumber(params.targetDurationGap as number)} years. The final gap is ${formatNumber(afterMetrics.durationGap)} years.\n\n`;
     } else if (getDurationBreachDistance(beforeMetrics.durationGap, params.maxDurationShortfall, params.maxDurationSurplus) > 0) {
@@ -725,6 +727,6 @@ export const runOptimizer = (
   } catch (e: any) {
     console.error("Critical error in optimizer service:", e);
     // Re-throw a user-friendly error that the UI component can display.
-    throw new Error(`The optimization engine failed. This is often caused by invalid data (e.g., text in a numeric column) in the bond master CSV. Original error: ${e.message}`);
+    throw new Error(`The optimisation engine failed. This is often caused by invalid data (e.g., text in a numeric column) in the bond master CSV. Original error: ${e.message}`);
   }
 };

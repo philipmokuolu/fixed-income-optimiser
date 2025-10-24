@@ -280,7 +280,7 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
                     <div>
                       <label htmlFor="bondSelect" className="block text-sm font-medium text-slate-400">Select Bond</label>
                       <select id="bondSelect" value={selectedExistingBond} onChange={e => setSelectedExistingBond(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
-                        {portfolio.bonds.map(b => <option key={b.isin} value={b.isin}>{b.name}</option>)}
+                        {portfolio.bonds.slice().sort((a,b) => a.name.localeCompare(b.name)).map(b => <option key={b.isin} value={b.isin}>{b.name}</option>)}
                       </select>
                       {currentSelectedBond && (
                         <p className="text-xs text-slate-500 mt-1">Currently held: <span className="font-mono text-slate-400">{formatNumber(currentSelectedBond.notional)}</span></p>

@@ -65,7 +65,6 @@ export interface Portfolio extends KRDFields {
   totalMarketValue: number; // This will now be in the base currency (USD)
   modifiedDuration: number;
   averageYield: number;
-  warnings?: string[]; // To hold data integrity warnings
 }
 
 // Represents the user's manual input for top-level benchmark data
@@ -87,6 +86,7 @@ export interface OptimizationParams {
   mode: 'switch' | 'buy-only' | 'sell-only';
   investmentHorizonLimit: number;
   minimumPurchaseRating: string;
+  maximumPurchaseRating: string;
   minimumYield?: number;
   cashToRaise?: number;
   newCashToInvest?: number;

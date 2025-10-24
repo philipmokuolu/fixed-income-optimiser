@@ -30,34 +30,6 @@ const ChartTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-const DataWarning: React.FC<{ warnings: string[] }> = ({ warnings }) => (
-    <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-amber-900/40 border border-amber-500/40 p-4 rounded-lg mb-6 text-amber-200"
-    >
-        <div className="flex">
-            <div className="flex-shrink-0">
-                 <svg className="h-5 w-5 text-amber-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                </svg>
-            </div>
-            <div className="ml-3">
-                <h3 className="text-sm font-medium text-amber-300">Data Integrity Warning</h3>
-                <div className="mt-2 text-sm text-amber-200">
-                    <ul className="list-disc space-y-1 pl-5">
-                        {warnings.map((warning, index) => <li key={index}>{warning}</li>)}
-                    </ul>
-                    <p className="mt-3">
-                        <strong>Action Required:</strong> Please check your uploaded CSV files (especially `bondMasterData.csv`) for text or non-standard errors in numeric columns. Replace these values with `0` or remove the rows to ensure all calculations are accurate.
-                    </p>
-                </div>
-            </div>
-        </div>
-    </motion.div>
-);
-
-
 const containerVariants = {
   hidden: { opacity: 1 },
   visible: {
@@ -89,11 +61,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, sett
   const krdGapData = useMemo(() => {
     return KRD_TENORS.map(tenor => {
       const krdKey: KrdKey = `krd_${tenor}`;
-      const portfolioKrd = portfolio[krdKey] || 0;
-      const benchmarkKrd = benchmark[krdKey] || 0;
       return {
         tenor,
-        'Active KRD': portfolioKrd - benchmarkKrd
+        'Active KRD': portfolio[krdKey] - benchmark[krdKey]
       }
     });
   }, [portfolio, benchmark]);
@@ -141,8 +111,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, sett
       const krdKey = `krd_${t}` as KrdKey;
       return {
         tenor: t,
-        Portfolio: portfolio[krdKey] || 0,
-        Benchmark: benchmark[krdKey] || 0
+        Portfolio: portfolio[krdKey],
+        Benchmark: benchmark[krdKey]
       }
     })
   }, [portfolio, benchmark]);
@@ -159,10 +129,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, sett
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      {portfolio.warnings && portfolio.warnings.length > 0 && (
-          <DataWarning warnings={portfolio.warnings} />
-      )}
-      
       <h1 className="text-2xl font-bold text-white">Main Dashboard</h1>
       
       <motion.div 
@@ -252,7 +218,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, sett
                           fill="#8884d8"
                           dataKey="value"
                           nameKey="name"
-                          label={({ name, percent }) => `${name} ${formatNumber(percent * 100, {maximumFractionDigits: 0})}%`}
+                          // FIX: Add explicit types for label props to resolve TS error
+                          label={({ name, percent }: { name: string, percent: number }) => `${name} ${formatNumber(percent * 100, {maximumFractionDigits: 0})}%`}
                         >
                           {currencyData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />

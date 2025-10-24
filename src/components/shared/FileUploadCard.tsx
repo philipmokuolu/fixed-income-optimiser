@@ -1,12 +1,13 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Card } from './Card';
+import * as dataService from '@/services/dataService';
 
 interface FileUploadCardProps {
     title: string;
     description: string;
     expectedColumns: string[];
     onFileUpload: (file: File) => Promise<void>;
-    lastUpdated?: string;
+    storageKey: string;
 }
 
 type Status = 'idle' | 'processing' | 'success' | 'error';
@@ -17,10 +18,15 @@ const UploadIcon: React.FC = () => (
     </svg>
 );
 
-export const FileUploadCard: React.FC<FileUploadCardProps> = ({ title, description, expectedColumns, onFileUpload, lastUpdated }) => {
+export const FileUploadCard: React.FC<FileUploadCardProps> = ({ title, description, expectedColumns, onFileUpload, storageKey }) => {
     const [status, setStatus] = useState<Status>('idle');
     const [message, setMessage] = useState('Drag & drop your CSV file here, or click to select.');
     const [isDragOver, setIsDragOver] = useState(false);
+    const [metadata, setMetadata] = useState<dataService.FileMetadata | null>(null);
+
+    useEffect(() => {
+        setMetadata(dataService.loadFileMetadata(storageKey));
+    }, [storageKey]);
 
     const handleFile = useCallback(async (file: File | null) => {
         if (!file) return;
@@ -29,13 +35,16 @@ export const FileUploadCard: React.FC<FileUploadCardProps> = ({ title, descripti
         setMessage(`Processing "${file.name}"...`);
         try {
             await onFileUpload(file);
+            const newMetadata = { fileName: file.name, uploadDate: new Date().toISOString() };
+            dataService.saveFileMetadata(storageKey, newMetadata);
+            setMetadata(newMetadata);
             setStatus('success');
             setMessage(`Successfully loaded "${file.name}". App has been updated.`);
         } catch (err: any) {
             setStatus('error');
             setMessage(err.message || 'An unknown error occurred.');
         }
-    }, [onFileUpload]);
+    }, [onFileUpload, storageKey]);
 
     const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
         event.preventDefault();
@@ -70,14 +79,8 @@ export const FileUploadCard: React.FC<FileUploadCardProps> = ({ title, descripti
 
     return (
         <Card className="flex flex-col">
-            <div className="flex justify-between items-start">
-                <h3 className="text-lg font-semibold text-slate-200">{title}</h3>
-                {lastUpdated && <span className="text-xs text-slate-500 whitespace-nowrap">Last updated:</span>}
-            </div>
-             <div className="flex justify-between items-start">
-                <p className="text-sm text-slate-400 mt-1">{description}</p>
-                 {lastUpdated && <span className="text-xs text-slate-400 text-right">{lastUpdated}</span>}
-            </div>
+            <h3 className="text-lg font-semibold text-slate-200">{title}</h3>
+            <p className="text-sm text-slate-400 mt-1">{description}</p>
             <div className="text-xs text-slate-500 bg-slate-950 p-2 rounded-md mt-3">
                 <span className="font-semibold">Expected Columns:</span> {expectedColumns.join(', ')}
             </div>
@@ -108,6 +111,11 @@ export const FileUploadCard: React.FC<FileUploadCardProps> = ({ title, descripti
                     </p>
                 </div>
             </div>
+            {metadata && (
+                <div className="mt-2 text-xs text-slate-500 text-center border-t border-slate-800 pt-2">
+                    Last file loaded: <span className="font-semibold text-slate-400">{metadata.fileName}</span> on {new Date(metadata.uploadDate).toLocaleDateString()}
+                </div>
+            )}
         </Card>
     );
 };

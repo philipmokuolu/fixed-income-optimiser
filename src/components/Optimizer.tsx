@@ -199,12 +199,11 @@ const ResultsDisplay: React.FC<{
                         <table className="min-w-full divide-y divide-slate-800">
                              <thead className="bg-slate-900/50">
                                 <tr>
-                                    <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Use</th>
+                                    <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Active</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Action</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">ISIN</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Name</th>
                                     <th className="px-2 py-2 text-center text-xs font-medium text-slate-400 uppercase">Rating</th>
-                                    <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Mod.Dur</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Notional</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">Yield (%)</th>
                                     <th className="px-2 py-2 text-right text-xs font-medium text-slate-400 uppercase">M.Val</th>
@@ -219,7 +218,6 @@ const ResultsDisplay: React.FC<{
                                         <td className="px-2 py-2 text-sm font-mono text-orange-400">{trade.isin}</td>
                                         <td className="px-2 py-2 text-sm max-w-xs truncate">{trade.name}</td>
                                         <td className="px-2 py-2 text-sm text-center font-mono">{trade.creditRating}</td>
-                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.modifiedDuration, {minimumFractionDigits: 2})}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.notional, 0, 0)}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.yieldToMaturity, {minimumFractionDigits: 2})}</td>
                                         <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.marketValue, 0, 0)}</td>
@@ -384,19 +382,13 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     const [displayNewCashToInvest, setDisplayNewCashToInvest] = useState('');
 
     const [mode, setMode] = useState<'switch' | 'buy-only' | 'sell-only'>('switch');
-    const [excludedBonds, setExcludedBonds] = useState<string[]>(() => {
-        try {
-            const saved = sessionStorage.getItem('optimiser_excludedBonds');
-            return saved ? JSON.parse(saved) : [];
-        } catch (e) {
-            return [];
-        }
-    });
+    const [excludedBonds, setExcludedBonds] = useState<string[]>([]);
     const [eligibilitySearch, setEligibilitySearch] = useState('');
     
     // New constraints state
     const [investmentHorizonLimit, setInvestmentHorizonLimit] = useState(() => sessionStorage.getItem('optimiser_horizonLimit') || '10');
     const [minimumPurchaseRating, setMinimumPurchaseRating] = useState(() => sessionStorage.getItem('optimiser_minRating') || 'BB-');
+    const [maximumPurchaseRating, setMaximumPurchaseRating] = useState(() => sessionStorage.getItem('optimiser_maxRating') || 'AAA');
 
     // Strategic Targeting State
     const [isTargetingMode, setIsTargetingMode] = useState(() => sessionStorage.getItem('optimiser_isTargetingMode') === 'true' || false);
@@ -433,10 +425,9 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     useEffect(() => { sessionStorage.setItem('optimiser_transactionCost', transactionCost); }, [transactionCost]);
     useEffect(() => { sessionStorage.setItem('optimiser_horizonLimit', investmentHorizonLimit); }, [investmentHorizonLimit]);
     useEffect(() => { sessionStorage.setItem('optimiser_minRating', minimumPurchaseRating); }, [minimumPurchaseRating]);
+    useEffect(() => { sessionStorage.setItem('optimiser_maxRating', maximumPurchaseRating); }, [maximumPurchaseRating]);
     useEffect(() => { sessionStorage.setItem('optimiser_isTargetingMode', String(isTargetingMode)); }, [isTargetingMode]);
     useEffect(() => { sessionStorage.setItem('optimiser_targetDurationGap', targetDurationGap); }, [targetDurationGap]);
-    useEffect(() => { sessionStorage.setItem('optimiser_excludedBonds', JSON.stringify(excludedBonds)); }, [excludedBonds]);
-
 
     useEffect(() => {
         if (result) sessionStorage.setItem('optimiser_result', JSON.stringify(result));
@@ -462,6 +453,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                     mode,
                     investmentHorizonLimit: Number(investmentHorizonLimit),
                     minimumPurchaseRating: minimumPurchaseRating,
+                    maximumPurchaseRating: maximumPurchaseRating,
                     cashToRaise: mode === 'sell-only' ? Number(cashToRaise) : undefined,
                     newCashToInvest: mode === 'buy-only' ? Number(newCashToInvest) : undefined,
                     isTargetingMode,
@@ -475,19 +467,19 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                 const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData, fxRates);
                 
                 if (!optoResult) {
-                    throw new Error("Optimizer returned no result. This may be due to an internal calculation error.");
+                    throw new Error("Optimiser returned no result. This may be due to an internal calculation error.");
                 }
 
                 setResult(optoResult);
                 setActiveTrades(new Set(optoResult.proposedTrades.map(t => t.pairId)));
             } catch (e: any) {
-                console.error("Optimization failed:", e);
+                console.error("Optimisation failed:", e);
                 setError(e.message || "An unexpected error occurred. Please check data files for inconsistencies or invalid numeric values.");
             } finally {
                 setIsLoading(false);
             }
         }, 500); // simulate async work
-    }, [maxTurnover, cashToRaise, newCashToInvest, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, isTargetingMode, targetDurationGap, portfolio, benchmark, bondMasterData, appSettings, fxRates]);
+    }, [maxTurnover, cashToRaise, newCashToInvest, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, maximumPurchaseRating, isTargetingMode, targetDurationGap, portfolio, benchmark, bondMasterData, appSettings, fxRates]);
     
     const handleResetOptimiser = () => {
         setResult(null);
@@ -528,9 +520,11 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         const afterPortfolio = calculatePortfolioMetrics(afterPortfolioBonds);
         
         const activeTradedValue = activeProposedTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
-        const activeFeeCost = (mode === 'switch' ? activeTradedValue / 2 : activeTradedValue) * (Number(transactionCost) / 10000);
+        // FIX: Explicitly parse transactionCost string to a number to avoid potential type errors.
+        const numericTransactionCost = parseFloat(transactionCost) || 0;
+        const activeFeeCost = (mode === 'switch' ? activeTradedValue / 2 : activeTradedValue) * (numericTransactionCost / 10000);
         const activeSpreadCost = activeProposedTrades.reduce((sum, trade) => sum + trade.spreadCost, 0);
-        const activeAggregateFeeBps = activeProposedTrades.length * Number(transactionCost);
+        const activeAggregateFeeBps = activeProposedTrades.length * numericTransactionCost;
         
         return {
             result,
@@ -647,6 +641,13 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                 </select>
                                 <p className="text-xs text-slate-500 mt-1">Sets the minimum credit quality for any proposed buys.</p>
                             </div>
+                             <div>
+                                <label htmlFor="maxRating" className="block text-sm font-medium text-slate-300">Maximum Purchase Rating</label>
+                                <select id="maxRating" value={maximumPurchaseRating} onChange={e => setMaximumPurchaseRating(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                                    {ALL_RATINGS_ORDERED.map(r => r !== 'N/A' && <option key={r} value={r}>{r}</option>)}
+                                </select>
+                                <p className="text-xs text-slate-500 mt-1">Sets the maximum credit quality for any proposed buys.</p>
+                            </div>
                         </div>
                     </Card>
 
@@ -686,9 +687,12 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                 Reset
                             </button>
                         </div>
+                        <div className="mt-4 text-xs text-slate-500 bg-slate-800/40 p-2 rounded-md">
+                            <strong>Iterative Mode:</strong> You can untick any trades you do not wish to execute. The Impact Analysis will update in real-time.
+                        </div>
                         {error && (
                             <div className="mt-4 p-3 bg-red-900/50 border border-red-500/50 rounded-md text-red-300 text-sm" role="alert">
-                                <p className="font-bold">Optimization Error</p>
+                                <p className="font-bold">Optimisation Error</p>
                                 <p>{error}</p>
                             </div>
                         )}
