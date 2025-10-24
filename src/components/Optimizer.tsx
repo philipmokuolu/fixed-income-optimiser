@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Portfolio, Benchmark, OptimizationParams, OptimizationResult, BondStaticData, AppSettings, ProposedTrade, Portfolio as PortfolioType, KRD_TENORS, KrdKey, Bond, FxRates } from '@/types';
 import { Card } from '@/components/shared/Card';
+import { CustomSelect } from '@/components/shared/CustomSelect';
 import * as optimizerService from '@/services/optimizerService';
 import { formatNumber, formatCurrency, formatCurrencyM } from '@/utils/formatting';
 import { calculatePortfolioMetrics, applyTradesToPortfolio, calculateTrackingError } from '@/services/portfolioService';
@@ -562,11 +563,11 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
         const afterPortfolio = calculatePortfolioMetrics(applyTradesToPortfolio(initialPortfolio.bonds, allActiveTrades, bondMasterData, fxRates));
         
         const activeTradedValue = allActiveTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
-        // FIX: Replaced parseFloat with the stricter Number() to fix a TypeScript arithmetic error.
-        // This ensures a more robust conversion from the string state to a number for calculations.
         const numericTransactionCost = Number(transactionCost) || 0;
         const activeFeeCost = (mode === 'switch' ? activeTradedValue / 2 : activeTradedValue) * (numericTransactionCost / 10000);
         const activeSpreadCost = allActiveTrades.reduce((sum, trade) => sum + trade.spreadCost, 0);
+        // FIX: The `transactionCost` state is a string and cannot be used in an arithmetic operation directly.
+        // It must be converted to a number before being used in the calculation.
         const activeAggregateFeeBps = allActiveTrades.length * numericTransactionCost;
         
         return {
@@ -610,11 +611,12 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     };
 
     const handleTargetGapChange = (value: string) => {
-        // Allow negative sign and one decimal point
         if (/^-?\d*\.?\d*$/.test(value)) {
             setTargetDurationGap(value);
         }
     }
+
+    const ratingOptions = useMemo(() => ALL_RATINGS_ORDERED.filter(r => r !== 'N/A').map(r => ({ value: r, label: r })), []);
 
     return (
         <div className="p-4 sm:p-6 lg:p-8 space-y-6">
@@ -680,16 +682,12 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                             </div>
                              <div>
                                 <label htmlFor="minRating" className="block text-sm font-medium text-slate-300">Minimum Purchase Rating</label>
-                                <select id="minRating" value={minimumPurchaseRating} onChange={e => setMinimumPurchaseRating(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
-                                    {ALL_RATINGS_ORDERED.map(r => r !== 'N/A' && <option key={r} value={r}>{r}</option>)}
-                                </select>
+                                <CustomSelect options={ratingOptions} value={minimumPurchaseRating} onChange={setMinimumPurchaseRating} className="mt-1"/>
                                 <p className="text-xs text-slate-500 mt-1">Sets the minimum credit quality for any proposed buys.</p>
                             </div>
                              <div>
                                 <label htmlFor="maxRating" className="block text-sm font-medium text-slate-300">Maximum Purchase Rating</label>
-                                <select id="maxRating" value={maximumPurchaseRating} onChange={e => setMaximumPurchaseRating(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
-                                    {ALL_RATINGS_ORDERED.map(r => r !== 'N/A' && <option key={r} value={r}>{r}</option>)}
-                                </select>
+                                <CustomSelect options={ratingOptions} value={maximumPurchaseRating} onChange={setMaximumPurchaseRating} className="mt-1"/>
                                 <p className="text-xs text-slate-500 mt-1">Sets the maximum credit quality for any proposed buys.</p>
                             </div>
                         </div>

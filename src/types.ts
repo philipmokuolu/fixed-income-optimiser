@@ -148,3 +148,18 @@ export interface HypotheticalTrade {
 
 // Type for FX rates against a base currency (USD)
 export type FxRates = Record<string, number>;
+
+// --- START: DATA VALIDATION TYPES ---
+export type FileType = 'holdings' | 'bondMaster' | 'benchmarkHoldings';
+
+export interface ValidationIssue {
+  type: 'error' | 'warning';
+  message: string;
+}
+
+export interface ValidationResult {
+  errors: ValidationIssue[];
+  warnings: ValidationIssue[];
+  isValid: boolean;
+}
+// --- END: DATA VALIDATION TYPES ---

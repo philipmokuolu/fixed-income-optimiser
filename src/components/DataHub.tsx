@@ -41,16 +41,16 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
             }
         });
         return Array.from(currencies);
-    }, [onDataUploaded]); // Re-run when data changes
+    }, []); // Dependency array is empty to run only once, but onDataUploaded should trigger a re-render via parent state change
 
-    const handleHoldingsUpload = async (file: File) => {
+    const handleHoldingsUpload = useCallback(async (file: File) => {
         const expectedHeaders = ['isin', 'notional'];
         const holdingsJson = await parseCsvToJson<PortfolioHolding>(file, expectedHeaders);
         dataService.savePortfolioHoldings(holdingsJson);
         onDataUploaded();
-    };
+    }, [onDataUploaded]);
 
-    const handleBondMasterUpload = async (file: File) => {
+    const handleBondMasterUpload = useCallback(async (file: File) => {
         const expectedHeaders = ['isin', 'name', 'currency', 'maturityDate', 'coupon', 'price', 'yieldToMaturity', 'modifiedDuration', 'creditRating', 'liquidityScore', 'bidAskSpread', ...KRD_TENORS.map(t => `krd_${t}`), 'minTradeSize', 'tradeIncrement'];
         const bondMasterJson = await parseCsvToJson<(BondStaticData & { isin: string })>(file, expectedHeaders);
         
@@ -64,14 +64,14 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
 
         dataService.saveBondMasterData(bondMasterRecord);
         onDataUploaded();
-    };
+    }, [onDataUploaded]);
 
-    const handleBenchmarkHoldingsUpload = async (file: File) => {
+    const handleBenchmarkHoldingsUpload = useCallback(async (file: File) => {
         const expectedHeaders = ['isin', 'weight'];
         const benchmarkHoldingsJson = await parseCsvToJson<BenchmarkHolding>(file, expectedHeaders);
         dataService.saveBenchmarkHoldings(benchmarkHoldingsJson);
         onDataUploaded();
-    };
+    }, [onDataUploaded]);
 
     const handleAggregateChange = (field: keyof Omit<BenchmarkAggregate, 'modifiedDuration'>, value: string) => {
         if (benchmarkAggregate) {
@@ -146,6 +146,7 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
                     expectedColumns={['isin', 'notional']}
                     onFileUpload={handleHoldingsUpload}
                     storageKey={dataService.LS_KEYS.HOLDINGS_META}
+                    fileType="holdings"
                 />
                 <FileUploadCard
                     title="2. Bond Master & Universe"
@@ -153,6 +154,7 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
                     expectedColumns={['isin', 'name', 'price', 'modifiedDuration', 'bidAskSpread', 'minTradeSize', 'tradeIncrement', '...etc']}
                     onFileUpload={handleBondMasterUpload}
                     storageKey={dataService.LS_KEYS.BOND_MASTER_META}
+                    fileType="bondMaster"
                 />
                  <Card>
                     <h3 className="text-lg font-semibold text-slate-200">3. Benchmark Configuration</h3>
@@ -186,6 +188,7 @@ export const DataHub: React.FC<DataHubProps> = ({ onDataUploaded }) => {
                             expectedColumns={['isin', 'weight']}
                             onFileUpload={handleBenchmarkHoldingsUpload}
                             storageKey={dataService.LS_KEYS.BENCHMARK_HOLDINGS_META}
+                            fileType="benchmarkHoldings"
                         />
                     </div>
                  </Card>

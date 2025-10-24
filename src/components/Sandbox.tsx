@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Portfolio, Benchmark, Bond, HypotheticalTrade, KrdTenor, KRD_TENORS, AppSettings, BondStaticData } from '@/types';
 import { Card } from '@/components/shared/Card';
+import { CustomSelect } from '@/components/shared/CustomSelect';
 import { Dashboard } from '@/components/Dashboard';
 import { calculateScenarioPnl, RateScenario, calculatePortfolioMetrics } from '@/services/portfolioService';
 import * as dataService from '@/services/dataService';
@@ -266,6 +267,18 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
       return null;
   }, [newBondIsin, bondMasterData, portfolio.bonds]);
 
+  const bondOptions = useMemo(() => 
+    portfolio.bonds.slice()
+      .sort((a,b) => a.name.localeCompare(b.name))
+      .map(b => ({ value: b.isin, label: b.name })),
+  [portfolio.bonds]);
+
+  const scenarioOptions = [
+    { value: 'parallel', label: 'Parallel Shift' },
+    { value: 'steepener', label: 'Steepener' },
+    { value: 'flattener', label: 'Flattener' },
+    { value: 'custom', label: 'Custom' },
+  ];
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
@@ -278,10 +291,13 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
                 <div className="border border-slate-800 p-3 rounded-lg">
                     <h4 className="text-md font-semibold text-slate-300 mb-2">Trade Existing Holdings</h4>
                     <div>
-                      <label htmlFor="bondSelect" className="block text-sm font-medium text-slate-400">Select Bond</label>
-                      <select id="bondSelect" value={selectedExistingBond} onChange={e => setSelectedExistingBond(e.target.value)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
-                        {portfolio.bonds.slice().sort((a,b) => a.name.localeCompare(b.name)).map(b => <option key={b.isin} value={b.isin}>{b.name}</option>)}
-                      </select>
+                      <label htmlFor="bondSelect" className="block text-sm font-medium text-slate-400 mb-1">Select Bond</label>
+                      <CustomSelect
+                        options={bondOptions}
+                        value={selectedExistingBond}
+                        onChange={setSelectedExistingBond}
+                        placeholder="Select a bond..."
+                      />
                       {currentSelectedBond && (
                         <p className="text-xs text-slate-500 mt-1">Currently held: <span className="font-mono text-slate-400">{formatNumber(currentSelectedBond.notional)}</span></p>
                       )}
@@ -348,13 +364,12 @@ export const Sandbox: React.FC<SandboxProps> = ({ portfolio, benchmark, bondMast
              <h3 className="text-lg font-semibold text-slate-200 mb-4">Interest Rate Scenario Modeller</h3>
              <div className="space-y-4">
                 <div>
-                   <label htmlFor="scenarioType" className="block text-sm font-medium text-slate-300">Scenario Type</label>
-                   <select id="scenarioType" value={scenarioType} onChange={e => setScenarioType(e.target.value as any)} className="mt-1 block w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
-                       <option value="parallel">Parallel Shift</option>
-                       <option value="steepener">Steepener</option>
-                       <option value="flattener">Flattener</option>
-                       <option value="custom">Custom</option>
-                   </select>
+                   <label htmlFor="scenarioType" className="block text-sm font-medium text-slate-300 mb-1">Scenario Type</label>
+                   <CustomSelect
+                     options={scenarioOptions}
+                     value={scenarioType}
+                     onChange={(v) => setScenarioType(v as any)}
+                   />
                 </div>
                  <div className="border-t border-slate-800 pt-4">
                     {scenarioType === 'parallel' && (
