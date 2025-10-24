@@ -218,8 +218,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ portfolio, benchmark, sett
                           fill="#8884d8"
                           dataKey="value"
                           nameKey="name"
-                          // FIX: Add explicit types for label props to resolve TS error
-                          label={({ name, percent }: { name: string, percent: number }) => `${name} ${formatNumber(percent * 100, {maximumFractionDigits: 0})}%`}
+                          // FIX: The explicit type for the label prop was incorrect. The `percent` property is optional, 
+                          // so it's now marked as such and a fallback is provided to prevent runtime errors.
+                          label={({ name, percent }: { name: string; percent?: number }) => `${name} ${formatNumber((percent || 0) * 100, {maximumFractionDigits: 0})}%`}
                         >
                           {currencyData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />

@@ -106,6 +106,12 @@ const ChevronIcon: React.FC<{ expanded: boolean, visible: boolean }> = ({ expand
       </svg>
     );
 };
+
+const LockIcon: React.FC = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+    </svg>
+);
 // --- END: HIERARCHICAL RATING LOGIC ---
 
 const ImpactRow: React.FC<{label: string, before: number, after: number, unit: string, formatOpts?: Intl.NumberFormatOptions}> = ({label, before, after, unit, formatOpts={minimumFractionDigits: 2, maximumFractionDigits: 2}}) => {
@@ -125,6 +131,7 @@ const ImpactRow: React.FC<{label: string, before: number, after: number, unit: s
 
 const ResultsDisplay: React.FC<{
     result: OptimizationResult;
+    lockedTrades: ProposedTrade[];
     onTradeToggle: (pairId: number) => void;
     activeTrades: Set<number>;
     initialPortfolio: PortfolioType;
@@ -133,7 +140,7 @@ const ResultsDisplay: React.FC<{
     activeFeeCost: number;
     activeSpreadCost: number;
     activeAggregateFeeBps: number;
-}> = ({ result, onTradeToggle, activeTrades, initialPortfolio, afterPortfolio, benchmark, activeFeeCost, activeSpreadCost, activeAggregateFeeBps }) => {
+}> = ({ result, lockedTrades, onTradeToggle, activeTrades, initialPortfolio, afterPortfolio, benchmark, activeFeeCost, activeSpreadCost, activeAggregateFeeBps }) => {
     
     const [expandedRatings, setExpandedRatings] = useState<Set<string>>(new Set());
 
@@ -193,13 +200,13 @@ const ResultsDisplay: React.FC<{
             </div>
 
             <div>
-                <h3 className="text-lg font-semibold text-slate-200 mb-2">Proposed Trades</h3>
-                {result.proposedTrades.length > 0 ? (
+                <h3 className="text-lg font-semibold text-slate-200 mb-2">Proposed & Locked Trades</h3>
+                {(result.proposedTrades.length > 0 || lockedTrades.length > 0) ? (
                      <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-800">
                              <thead className="bg-slate-900/50">
                                 <tr>
-                                    <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Active</th>
+                                    <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Status</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Action</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">ISIN</th>
                                     <th className="px-2 py-2 text-left text-xs font-medium text-slate-400 uppercase">Name</th>
@@ -211,9 +218,22 @@ const ResultsDisplay: React.FC<{
                                 </tr>
                              </thead>
                              <tbody className="divide-y divide-slate-800">
+                                {lockedTrades.map(trade => (
+                                     <tr key={trade.isin + trade.action + trade.pairId} className="bg-slate-800/20 opacity-80 hover:bg-slate-800/50">
+                                        <td className="px-2 py-2"><div className="flex justify-center"><LockIcon/></div></td>
+                                        <td className={`px-2 py-2 text-sm font-semibold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
+                                        <td className="px-2 py-2 text-sm font-mono text-orange-400">{trade.isin}</td>
+                                        <td className="px-2 py-2 text-sm max-w-xs truncate">{trade.name}</td>
+                                        <td className="px-2 py-2 text-sm text-center font-mono">{trade.creditRating}</td>
+                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.notional, 0, 0)}</td>
+                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatNumber(trade.yieldToMaturity, {minimumFractionDigits: 2})}</td>
+                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.marketValue, 0, 0)}</td>
+                                        <td className="px-2 py-2 text-sm text-right font-mono">{formatCurrency(trade.spreadCost, 2, 2)}</td>
+                                    </tr>
+                                ))}
                                 {result.proposedTrades.map(trade => (
                                     <tr key={trade.isin + trade.action + trade.pairId} className={`transition-opacity ${activeTrades.has(trade.pairId) ? 'opacity-100' : 'opacity-50'} hover:bg-slate-800/50`}>
-                                        <td className="px-2 py-2"><input type="checkbox" checked={activeTrades.has(trade.pairId)} onChange={() => onTradeToggle(trade.pairId)} className="form-checkbox h-4 w-4 bg-slate-700 border-slate-600 text-orange-500 rounded focus:ring-orange-500" /></td>
+                                        <td className="px-2 py-2 text-center"><input type="checkbox" checked={activeTrades.has(trade.pairId)} onChange={() => onTradeToggle(trade.pairId)} className="form-checkbox h-4 w-4 bg-slate-800 border-slate-600 rounded focus:ring-orange-500 accent-orange-500" /></td>
                                         <td className={`px-2 py-2 text-sm font-semibold ${trade.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
                                         <td className="px-2 py-2 text-sm font-mono text-orange-400">{trade.isin}</td>
                                         <td className="px-2 py-2 text-sm max-w-xs truncate">{trade.name}</td>
@@ -256,7 +276,7 @@ const ResultsDisplay: React.FC<{
                 </div>
             </div>
 
-            {result.proposedTrades.length > 0 && (
+            {(result.proposedTrades.length > 0 || lockedTrades.length > 0) && (
                 <div className="border-t-2 border-slate-800 pt-6 mt-6">
                     <h3 className="text-xl font-semibold text-slate-100 mb-4">Post-Trade Analysis</h3>
                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -394,22 +414,17 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     const [isTargetingMode, setIsTargetingMode] = useState(() => sessionStorage.getItem('optimiser_isTargetingMode') === 'true' || false);
     const [targetDurationGap, setTargetDurationGap] = useState(() => sessionStorage.getItem('optimiser_targetDurationGap') || '0.0');
 
+    // --- NEW STATE FOR ITERATIVE WORKFLOW ---
+    const [initialPortfolio, setInitialPortfolio] = useState<PortfolioType>(portfolio);
+    const [lockedTrades, setLockedTrades] = useState<ProposedTrade[]>([]);
+    const [result, setResult] = useState<OptimizationResult | null>(null);
+    const [isFirstRun, setIsFirstRun] = useState(true);
+    // --- END NEW STATE ---
 
-    const [result, setResult] = useState<OptimizationResult | null>(() => {
-        try {
-            const saved = sessionStorage.getItem('optimiser_result');
-            return saved ? JSON.parse(saved) : null;
-        } catch (e) { return null; }
-    });
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     
-    const [activeTrades, setActiveTrades] = useState<Set<number>>(() => {
-        try {
-            const saved = sessionStorage.getItem('optimiser_activeTrades');
-            return saved ? new Set(JSON.parse(saved)) : new Set();
-        } catch (e) { return new Set(); }
-    });
+    const [activeTrades, setActiveTrades] = useState<Set<number>>(new Set());
     
     const formatForDisplay = (value: string) => {
         const num = parseInt(value.replace(/,/g, ''), 10);
@@ -419,6 +434,8 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     useEffect(() => { setDisplayCashToRaise(formatForDisplay(cashToRaise)); }, [cashToRaise]);
     useEffect(() => { setDisplayNewCashToInvest(formatForDisplay(newCashToInvest)); }, [newCashToInvest]);
     
+    // --- OMITTING SESSION STORAGE FOR COMPLEX STATE DURING DEVELOPMENT ---
+    // This simplifies debugging the new iterative logic. Can be re-added later.
     useEffect(() => { sessionStorage.setItem('optimiser_maxTurnover', maxTurnover); }, [maxTurnover]);
     useEffect(() => { sessionStorage.setItem('optimiser_cashToRaise', cashToRaise); }, [cashToRaise]);
     useEffect(() => { sessionStorage.setItem('optimiser_newCashToInvest', newCashToInvest); }, [newCashToInvest]);
@@ -429,25 +446,15 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     useEffect(() => { sessionStorage.setItem('optimiser_isTargetingMode', String(isTargetingMode)); }, [isTargetingMode]);
     useEffect(() => { sessionStorage.setItem('optimiser_targetDurationGap', targetDurationGap); }, [targetDurationGap]);
 
-    useEffect(() => {
-        if (result) sessionStorage.setItem('optimiser_result', JSON.stringify(result));
-        else sessionStorage.removeItem('optimiser_result');
-    }, [result]);
-    useEffect(() => {
-        sessionStorage.setItem('optimiser_activeTrades', JSON.stringify(Array.from(activeTrades)));
-    }, [activeTrades]);
-
-
-    const handleRunOptimiser = useCallback(() => {
+    const runOptimisationLogic = useCallback((portfolioToOptimise: PortfolioType, remainingTurnoverPercent: number) => {
         setIsLoading(true);
-        setResult(null);
         setError(null);
-
+        
         setTimeout(() => {
             try {
                 const params: OptimizationParams = {
                     ...appSettings,
-                    maxTurnover: Number(maxTurnover),
+                    maxTurnover: remainingTurnoverPercent,
                     transactionCost: Number(transactionCost),
                     excludedBonds,
                     mode,
@@ -464,7 +471,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                     throw new Error("One of the input parameters is not a valid number.");
                 }
 
-                const optoResult = optimizerService.runOptimizer(portfolio, benchmark, params, bondMasterData, fxRates);
+                const optoResult = optimizerService.runOptimizer(portfolioToOptimise, benchmark, params, bondMasterData, fxRates);
                 
                 if (!optoResult) {
                     throw new Error("Optimiser returned no result. This may be due to an internal calculation error.");
@@ -479,14 +486,46 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                 setIsLoading(false);
             }
         }, 500); // simulate async work
-    }, [maxTurnover, cashToRaise, newCashToInvest, transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, maximumPurchaseRating, isTargetingMode, targetDurationGap, portfolio, benchmark, bondMasterData, appSettings, fxRates]);
+    }, [transactionCost, excludedBonds, mode, investmentHorizonLimit, minimumPurchaseRating, maximumPurchaseRating, isTargetingMode, targetDurationGap, benchmark, bondMasterData, appSettings, fxRates, cashToRaise, newCashToInvest]);
     
+
+    const handleInitialRun = useCallback(() => {
+        setInitialPortfolio(portfolio); // Lock in the starting point
+        setLockedTrades([]); // Reset locked trades
+        setResult(null);
+        setIsFirstRun(false);
+        runOptimisationLogic(portfolio, Number(maxTurnover));
+    }, [portfolio, maxTurnover, runOptimisationLogic]);
+
+    const handleReRun = useCallback(() => {
+        if (!result) return;
+        
+        const selectedTradesToLock = result.proposedTrades.filter(t => activeTrades.has(t.pairId));
+        const newLockedTrades = [...lockedTrades, ...selectedTradesToLock];
+        setLockedTrades(newLockedTrades);
+        
+        const portfolioForNextRun = calculatePortfolioMetrics(
+            applyTradesToPortfolio(initialPortfolio.bonds, newLockedTrades, bondMasterData, fxRates)
+        );
+
+        const turnoverUsedSoFar = newLockedTrades.reduce((sum, trade) => sum + (trade.action === 'SELL' ? trade.marketValue : 0), 0);
+        const maxTurnoverValue = (Number(maxTurnover) / 100) * initialPortfolio.totalMarketValue;
+        const remainingTurnoverValue = Math.max(0, maxTurnoverValue - turnoverUsedSoFar);
+        const remainingTurnoverPercent = (remainingTurnoverValue / portfolioForNextRun.totalMarketValue) * 100;
+        
+        setResult(null); // Clear previous proposed trades
+        runOptimisationLogic(portfolioForNextRun, remainingTurnoverPercent);
+
+    }, [result, activeTrades, lockedTrades, initialPortfolio, bondMasterData, fxRates, maxTurnover, runOptimisationLogic]);
+
+
     const handleResetOptimiser = () => {
         setResult(null);
         setActiveTrades(new Set());
+        setLockedTrades([]);
+        setInitialPortfolio(portfolio);
+        setIsFirstRun(true);
         setError(null);
-        sessionStorage.removeItem('optimiser_result');
-        sessionStorage.removeItem('optimiser_activeTrades');
     };
     
     const handleTradeToggle = (pairId: number) => {
@@ -504,36 +543,41 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
     const displayedResult = useMemo(() => {
         if (!result) return null;
         
-        const activeProposedTrades = result.proposedTrades.filter(t => activeTrades.has(t.pairId));
+        const allActiveTrades = [
+            ...lockedTrades,
+            ...result.proposedTrades.filter(t => activeTrades.has(t.pairId))
+        ];
         
-        if (activeProposedTrades.length === 0) {
+        if (allActiveTrades.length === 0) {
             return {
                 result,
-                afterPortfolio: result.impactAnalysis.before.portfolio,
+                lockedTrades,
+                afterPortfolio: initialPortfolio,
                 activeFeeCost: 0,
                 activeSpreadCost: 0,
                 activeAggregateFeeBps: 0
             }
         }
         
-        const afterPortfolioBonds = applyTradesToPortfolio(portfolio.bonds, activeProposedTrades, bondMasterData, fxRates);
-        const afterPortfolio = calculatePortfolioMetrics(afterPortfolioBonds);
+        const afterPortfolio = calculatePortfolioMetrics(applyTradesToPortfolio(initialPortfolio.bonds, allActiveTrades, bondMasterData, fxRates));
         
-        const activeTradedValue = activeProposedTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
-        // FIX: Explicitly parse transactionCost string to a number to avoid potential type errors.
-        const numericTransactionCost = parseFloat(transactionCost) || 0;
+        const activeTradedValue = allActiveTrades.reduce((sum, trade) => sum + trade.marketValue, 0);
+        // FIX: Replaced parseFloat with the stricter Number() to fix a TypeScript arithmetic error.
+        // This ensures a more robust conversion from the string state to a number for calculations.
+        const numericTransactionCost = Number(transactionCost) || 0;
         const activeFeeCost = (mode === 'switch' ? activeTradedValue / 2 : activeTradedValue) * (numericTransactionCost / 10000);
-        const activeSpreadCost = activeProposedTrades.reduce((sum, trade) => sum + trade.spreadCost, 0);
-        const activeAggregateFeeBps = activeProposedTrades.length * numericTransactionCost;
+        const activeSpreadCost = allActiveTrades.reduce((sum, trade) => sum + trade.spreadCost, 0);
+        const activeAggregateFeeBps = allActiveTrades.length * numericTransactionCost;
         
         return {
             result,
+            lockedTrades,
             afterPortfolio,
             activeFeeCost,
             activeSpreadCost,
             activeAggregateFeeBps
         }
-    }, [result, activeTrades, portfolio, bondMasterData, transactionCost, mode, fxRates]);
+    }, [result, activeTrades, lockedTrades, initialPortfolio, bondMasterData, transactionCost, mode, fxRates]);
 
     const filteredEligibilityBonds = useMemo(() => {
         return portfolio.bonds.filter(b => 
@@ -667,7 +711,7 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                     <input type="checkbox" 
                                         checked={!excludedBonds.includes(bond.isin)}
                                         onChange={() => setExcludedBonds(prev => prev.includes(bond.isin) ? prev.filter(i => i !== bond.isin) : [...prev, bond.isin])}
-                                        className="form-checkbox h-4 w-4 bg-slate-700 border-slate-600 text-orange-500 rounded focus:ring-orange-500"
+                                        className="form-checkbox h-4 w-4 bg-slate-800 border-slate-600 rounded focus:ring-orange-500 accent-orange-500"
                                     />
                                     <span className="text-sm text-slate-300 truncate">{bond.name}</span>
                                 </label>
@@ -680,16 +724,18 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                         <h3 className="text-lg font-semibold text-slate-200 mb-2">Execution</h3>
                         <p className="text-sm text-slate-400 mb-4">Click "Run Optimiser" to generate a set of trades to minimise risk based on your constraints.</p>
                          <div className="flex items-center space-x-4">
-                            <button onClick={handleRunOptimiser} disabled={isLoading} className="flex-1 bg-orange-600 text-white font-bold py-3 px-4 rounded-md hover:bg-orange-700 transition-colors disabled:bg-slate-700 disabled:cursor-not-allowed">
-                                {isLoading ? 'Optimising...' : 'Run Optimiser'}
+                            <button onClick={isFirstRun ? handleInitialRun : handleReRun} disabled={isLoading} className="flex-1 bg-orange-600 text-white font-bold py-3 px-4 rounded-md hover:bg-orange-700 transition-colors disabled:bg-slate-700 disabled:cursor-not-allowed">
+                                {isLoading ? 'Optimising...' : (isFirstRun ? 'Run Optimiser' : 'Re-run with Selected Trades')}
                             </button>
                              <button onClick={handleResetOptimiser} disabled={isLoading} className="bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-md hover:bg-slate-600 transition-colors">
                                 Reset
                             </button>
                         </div>
-                        <div className="mt-4 text-xs text-slate-500 bg-slate-800/40 p-2 rounded-md">
-                            <strong>Iterative Mode:</strong> You can untick any trades you do not wish to execute. The Impact Analysis will update in real-time.
-                        </div>
+                        {!isFirstRun &&
+                            <div className="mt-4 text-xs text-slate-500 bg-slate-800/40 p-2 rounded-md">
+                                <strong>Refine and Re-run:</strong> Untick trades to see their immediate impact. Click 'Re-run with Selected Trades' to lock in your choices and generate further recommendations.
+                            </div>
+                        }
                         {error && (
                             <div className="mt-4 p-3 bg-red-900/50 border border-red-500/50 rounded-md text-red-300 text-sm" role="alert">
                                 <p className="font-bold">Optimisation Error</p>
@@ -710,9 +756,10 @@ export const Optimiser: React.FC<OptimiserProps> = ({ portfolio, benchmark, bond
                                 <Card>
                                    <ResultsDisplay
                                         result={displayedResult.result}
+                                        lockedTrades={displayedResult.lockedTrades}
                                         onTradeToggle={handleTradeToggle}
                                         activeTrades={activeTrades}
-                                        initialPortfolio={portfolio}
+                                        initialPortfolio={initialPortfolio}
                                         afterPortfolio={displayedResult.afterPortfolio}
                                         benchmark={benchmark}
                                         activeFeeCost={displayedResult.activeFeeCost}
